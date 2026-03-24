@@ -1,4 +1,4 @@
-module github.com/go-guardian/mcp-server
+module github.com/kengou/go-guardian/mcp-server
 
 go 1.26
 

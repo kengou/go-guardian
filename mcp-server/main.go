@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-guardian/mcp-server/db"
-	"github.com/go-guardian/mcp-server/tools"
+	"github.com/kengou/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/tools"
 	"github.com/mark3labs/mcp-go/server"
 )
 

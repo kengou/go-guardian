@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

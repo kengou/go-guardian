@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // newTestStore opens an in-memory SQLite store for testing.

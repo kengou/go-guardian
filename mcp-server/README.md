@@ -49,7 +49,7 @@ External APIs (optional):
 ```
 mcp-server/
 ├── main.go              — Binary entrypoint: flags, DB init, MCP server setup, tool registration
-├── go.mod               — Module: github.com/go-guardian/mcp-server, Go 1.26
+├── go.mod               — Module: github.com/kengou/go-guardian/mcp-server, Go 1.26
 ├── db/
 │   ├── store.go         — All DB access: schema DDL, CRUD methods, PatternStats aggregation
 │   ├── schema.sql        — Reference DDL (source of truth for the embedded schema in store.go)

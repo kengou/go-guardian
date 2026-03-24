@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Safe for CGO_ENABLED=0 binaries; nonroot runs as uid/gid 65532.
 FROM gcr.io/distroless/static:nonroot
 
-LABEL org.opencontainers.image.source="https://github.com/go-guardian/go-guardian"
+LABEL org.opencontainers.image.source="https://github.com/kengou/go-guardian"
 LABEL org.opencontainers.image.description="go-guardian MCP server — self-learning Go development assistant"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 

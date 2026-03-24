@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // TestGetPatternStatsEmpty verifies that an empty store returns the

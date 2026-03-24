@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 const defaultGHSAURL = "https://api.github.com"

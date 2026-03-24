@@ -1,0 +1,44 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bump Go version in Dockerfile",
+      "managerFilePatterns": [
+        "/mcp-server/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "FROM --platform=\\$\\{BUILDPLATFORM\\} golang:(?<currentValue>[\\d.]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "golang"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchCategories": ["docker"],
+      "pinDigests": true,
+      "enabled": true
+    },
+    {
+      "matchManagers": ["gomod"],
+      "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"]
+    },
+    {
+      "matchDepTypes": ["action"],
+      "pinDigests": true
+    }
+  ],
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "separateMinorPatch": true,
+  "gomod": {
+    "enabled": true
+  }
+}
