@@ -1,0 +1,24 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: go-guardian-gateway
+  labels:
+    app: go-guardian
+spec:
+  # GatewayClass is cluster-specific. Common values:
+  #   istio        — Istio ambient/sidecar mesh
+  #   kgateway     — Solo.io kgateway (formerly Gloo Edge)
+  #   nginx        — NGINX Gateway Fabric
+  #   kong         — Kong Ingress Controller
+  # Set GATEWAY_CLASS to the value appropriate for your cluster.
+  gatewayClassName: istio  # CONFIGURABLE: change to your installed GatewayClass
+  listeners:
+  - name: mcp-tcp
+    port: 3000
+    protocol: TCP
+    allowedRoutes:
+      namespaces:
+        from: Same
+      kinds:
+      - group: gateway.networking.k8s.io
+        kind: TCPRoute

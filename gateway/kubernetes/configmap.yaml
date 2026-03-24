@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: go-guardian-config
+  labels:
+    app: go-guardian
+data:
+  config.yaml: |
+    # yaml-language-server: $schema=https://agentgateway.dev/schema/config
+    binds:
+    - port: 3000
+      listeners:
+      - routes:
+        - backends:
+          - mcp:
+              targets:
+              - name: go-guardian
+                stdio:
+                  cmd: /bin/go-guardian-mcp
+                  args: ["--db", "/data/guardian.db"]
+              - name: github-advisories
+                openapi:
+                  schema:
+                    file: /etc/go-guardian/openapi/github-advisories.json
+                  host: api.github.com
+                  headers:
+                    Authorization: "Bearer ${GITHUB_TOKEN}"
+                    X-GitHub-Api-Version: "2022-11-28"
+              - name: nvd
+                openapi:
+                  schema:
+                    file: /etc/go-guardian/openapi/nvd.json
+                  host: services.nvd.nist.gov
+                  headers:
+                    apiKey: "${NVD_API_KEY}"
+              - name: go-vuln
+                openapi:
+                  schema:
+                    file: /etc/go-guardian/openapi/go-vuln.json
+                  host: vuln.go.dev
+            policies:
+              cors:
+                allowOrigins:
+                - "http://localhost:*"
+                allowHeaders:
+                - content-type
+                - mcp-protocol-version
+                - mcp-session-id
+                exposeHeaders:
+                - mcp-session-id
+                - mcp-protocol-version
+                maxAge: 5m
+
+  # OpenAPI specs are mounted from a separate ConfigMap (go-guardian-openapi)
+  # at /etc/go-guardian/openapi/ via volumeMounts in the Deployment.
+  # See openapi-configmap.yaml or supply the files via a separate ConfigMap.
+  #
+  # To create the openapi ConfigMap from the bundled JSON files:
+  #   kubectl create configmap go-guardian-openapi \
+  #     --from-file=github-advisories.json=gateway/openapi/github-advisories.json \
+  #     --from-file=nvd.json=gateway/openapi/nvd.json \
+  #     --from-file=go-vuln.json=gateway/openapi/go-vuln.json

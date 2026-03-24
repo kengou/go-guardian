@@ -1,0 +1,41 @@
+{
+  "_comment": "go-guardian Claude Code settings template. Replace <PROJECT_ROOT> with actual path, or run install.sh to generate a pre-filled snippet at .go-guardian/settings-snippet.json",
+  "mcpServers": {
+    "go-guardian": {
+      "type": "stdio",
+      "command": "<PROJECT_ROOT>/.go-guardian/go-guardian-mcp",
+      "args": ["--db", "<PROJECT_ROOT>/.go-guardian/guardian.db"],
+      "env": {
+        "NVD_API_KEY": "",
+        "GITHUB_TOKEN": ""
+      }
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "<PROJECT_ROOT>/.go-guardian/hooks/session-start.sh"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "matcher": "Bash",
+        "command": "<PROJECT_ROOT>/.go-guardian/hooks/post-bash.sh"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "matcher": "Write",
+        "command": "<PROJECT_ROOT>/.go-guardian/hooks/pre-write-go.sh"
+      },
+      {
+        "type": "command",
+        "matcher": "Edit",
+        "command": "<PROJECT_ROOT>/.go-guardian/hooks/pre-edit-go.sh"
+      }
+    ]
+  }
+}

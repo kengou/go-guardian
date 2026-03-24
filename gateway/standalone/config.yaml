@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+binds:
+- port: 3000
+  listeners:
+  - routes:
+    - backends:
+      - mcp:
+          targets:
+          - name: go-guardian
+            stdio:
+              cmd: ./go-guardian-mcp
+              args: ["--db", ".go-guardian/guardian.db"]
+          - name: github-advisories
+            openapi:
+              schema:
+                file: ../openapi/github-advisories.json
+              host: api.github.com
+              headers:
+                Authorization: "Bearer ${GITHUB_TOKEN}"
+                X-GitHub-Api-Version: "2022-11-28"
+          - name: nvd
+            openapi:
+              schema:
+                file: ../openapi/nvd.json
+              host: services.nvd.nist.gov
+              headers:
+                apiKey: "${NVD_API_KEY}"
+          - name: go-vuln
+            openapi:
+              schema:
+                file: ../openapi/go-vuln.json
+              host: vuln.go.dev
+        policies:
+          cors:
+            allowOrigins:
+            - "http://localhost:*"
+            allowHeaders:
+            - content-type
+            - mcp-protocol-version
+            - mcp-session-id
+            exposeHeaders:
+            - mcp-session-id
+            - mcp-protocol-version
+            maxAge: 5m

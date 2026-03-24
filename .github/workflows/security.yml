@@ -1,0 +1,175 @@
+# Security CI pipeline for go-guardian MCP server.
+#
+# Runs on every PR and every push to main.
+# Gates:
+#   govulncheck  — Go vulnerability database check (fails on any VULN)
+#   staticcheck  — static analysis complement to golangci-lint
+#   trivy-scan   — container image scan (fails on CRITICAL CVEs)
+#   dependency-review — GitHub native dependency diff (PRs only)
+#
+# SARIF results from trivy and govulncheck are uploaded to GitHub Code Scanning
+# so findings appear on the Security tab without requiring a separate dashboard.
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # required for SARIF upload to Code Scanning
+  pull-requests: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # govulncheck: scan Go source against the Go vulnerability database.
+  # Fails the build if any imported package has a known vulnerability.
+  # JSON output is uploaded as an artifact for later triage.
+  # ---------------------------------------------------------------------------
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mcp-server/go.mod
+          cache-dependency-path: mcp-server/go.sum
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      # Run with -json so the output is machine-readable and uploadable.
+      # The exit code is still non-zero on found vulnerabilities.
+      - name: Run govulncheck
+        id: vulncheck
+        run: |
+          govulncheck -json ./... > govulncheck-results.json 2>&1 || true
+          # Exit non-zero if any VULN entries exist in the JSON output.
+          if grep -q '"Finding"' govulncheck-results.json; then
+            echo "::error::govulncheck found vulnerabilities — see artifact for details"
+            govulncheck ./...   # re-run human-readable output for the log
+            exit 1
+          fi
+
+      - name: Upload govulncheck results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: govulncheck-results
+          path: mcp-server/govulncheck-results.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # staticcheck: catches bugs and style issues that golangci-lint may miss.
+  # Runs as a complement, not a replacement — keep both in the pipeline.
+  # ---------------------------------------------------------------------------
+  staticcheck:
+    name: staticcheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mcp-server/go.mod
+          cache-dependency-path: mcp-server/go.sum
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+  # ---------------------------------------------------------------------------
+  # trivy-scan: scan the built container image for OS and language CVEs.
+  # CRITICAL severity causes an exit-code 1 (build fails).
+  # HIGH severity is reported but does not fail the build — review weekly.
+  # SARIF output is uploaded to GitHub Code Scanning.
+  # ---------------------------------------------------------------------------
+  trivy-scan:
+    name: trivy container scan
+    runs-on: ubuntu-latest
+    needs: [govulncheck]  # only build image after source passes vuln check
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (single platform, no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: mcp-server
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: go-guardian-mcp:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy (CRITICAL gate)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: go-guardian-mcp:ci
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Run Trivy (SARIF upload)
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: go-guardian-mcp:ci
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-container
+
+  # ---------------------------------------------------------------------------
+  # dependency-review: GitHub's native action that diffs dependency changes
+  # on pull requests and flags newly introduced vulnerabilities.
+  # Runs on PRs only (the action requires a base ref to diff against).
+  # ---------------------------------------------------------------------------
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Fail on any newly introduced HIGH or CRITICAL vulnerability.
+          fail-on-severity: high
+          # go.sum covers transitive deps; go.mod is the direct manifest.
+          dependency-files: mcp-server/go.mod,mcp-server/go.sum

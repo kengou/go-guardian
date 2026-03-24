@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Deploy with: kubectl apply -k gateway/kubernetes/
+#
+# Prerequisites before applying:
+#   1. Create the PVC for SQLite storage:
+#        kubectl apply -f - <<EOF
+#        apiVersion: v1
+#        kind: PersistentVolumeClaim
+#        metadata:
+#          name: go-guardian-data
+#        spec:
+#          accessModes: [ReadWriteOnce]
+#          resources:
+#            requests:
+#              storage: 1Gi
+#        EOF
+#
+#   2. Create the OpenAPI ConfigMap:
+#        kubectl create configmap go-guardian-openapi \
+#          --from-file=github-advisories.json=gateway/openapi/github-advisories.json \
+#          --from-file=nvd.json=gateway/openapi/nvd.json \
+#          --from-file=go-vuln.json=gateway/openapi/go-vuln.json
+#
+#   3. Build and push the go-guardian-mcp image, or load it into your cluster:
+#        docker build -t go-guardian-mcp:latest ./mcp-server
+#        kind load docker-image go-guardian-mcp:latest   # for kind clusters
+
+resources:
+- configmap.yaml
+- deployment.yaml
+- service.yaml
+- gateway.yaml
+- mcp-route.yaml

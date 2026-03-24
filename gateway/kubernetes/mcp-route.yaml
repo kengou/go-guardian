@@ -1,0 +1,18 @@
+# MCP uses a persistent connection (SSE or WebSocket) that requires TCP-level
+# routing rather than HTTP routing, so TCPRoute is the appropriate choice here.
+# If your GatewayClass only supports HTTPRoute, switch to HTTPRoute and ensure
+# your gateway listener uses protocol: HTTP or HTTPS instead of TCP.
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: go-guardian-mcp
+  labels:
+    app: go-guardian
+spec:
+  parentRefs:
+  - name: go-guardian-gateway
+    sectionName: mcp-tcp
+  rules:
+  - backendRefs:
+    - name: go-guardian
+      port: 3000

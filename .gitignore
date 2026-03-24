@@ -1,0 +1,33 @@
+# Runtime database and binary installed by install.sh
+.go-guardian/
+
+# go-guardian MCP server binary (if built locally outside mcp-server/)
+go-guardian-mcp
+
+# Secrets — never commit these
+.env
+.env.*
+*.hmac-key
+settings.local.json
+
+# Go build artifacts
+mcp-server/go-guardian-mcp
+vendor/
+*.test
+coverage.out
+cover.html
+
+# Test and lint caches
+.golangci-cache/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Ignore AI model files
+.beastmode/
+.security-hardening/

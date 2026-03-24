@@ -1,0 +1,291 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GitHub Advisory Database API",
+    "description": "REST API for querying the GitHub Advisory Database (GHSA). Provides access to security advisories affecting open-source packages.",
+    "version": "1.0.0",
+    "contact": {
+      "url": "https://docs.github.com/en/rest/security-advisories"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.github.com",
+      "description": "GitHub REST API"
+    }
+  ],
+  "paths": {
+    "/advisories": {
+      "get": {
+        "operationId": "listGlobalAdvisories",
+        "summary": "List global security advisories",
+        "description": "Returns a list of global security advisories from the GitHub Advisory Database. Use the ecosystem filter to restrict results to Go packages.",
+        "parameters": [
+          {
+            "name": "ecosystem",
+            "in": "query",
+            "description": "Filter advisories by package ecosystem. Use 'Go' for Go modules.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "actions",
+                "composer",
+                "erlang",
+                "go",
+                "maven",
+                "npm",
+                "nuget",
+                "other",
+                "pip",
+                "pub",
+                "rubygems",
+                "rust",
+                "swift"
+              ]
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "description": "Filter advisories by severity level.",
+            "schema": {
+              "type": "string",
+              "enum": ["unknown", "low", "medium", "high", "critical"]
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "description": "Number of results per page. Maximum 100.",
+            "schema": {
+              "type": "integer",
+              "default": 30,
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number of results to return (1-based).",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Filter by advisory type.",
+            "schema": {
+              "type": "string",
+              "enum": ["reviewed", "unreviewed", "malware"]
+            }
+          },
+          {
+            "name": "cve_id",
+            "in": "query",
+            "description": "Filter by CVE identifier (e.g. CVE-2023-1234).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of security advisories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecurityAdvisory"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed or endpoint has been spammed"
+          }
+        }
+      }
+    },
+    "/advisories/{ghsa_id}": {
+      "get": {
+        "operationId": "getGlobalAdvisory",
+        "summary": "Get a global security advisory by GHSA ID",
+        "description": "Returns a single global security advisory identified by its GHSA ID.",
+        "parameters": [
+          {
+            "name": "ghsa_id",
+            "in": "path",
+            "required": true,
+            "description": "The GHSA identifier of the advisory (e.g. GHSA-1234-5678-9abc).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A single security advisory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityAdvisory"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Advisory not found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SecurityAdvisory": {
+        "type": "object",
+        "properties": {
+          "ghsa_id": {
+            "type": "string",
+            "description": "The GitHub Security Advisory identifier (e.g. GHSA-1234-5678-9abc)."
+          },
+          "cve_id": {
+            "type": ["string", "null"],
+            "description": "The associated CVE identifier, if any."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL of the advisory on GitHub."
+          },
+          "html_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "summary": {
+            "type": "string",
+            "description": "A short description of the vulnerability."
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Full description of the vulnerability in Markdown."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["unknown", "low", "medium", "high", "critical"],
+            "description": "The overall severity of the advisory."
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the advisory was published."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "withdrawn_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "cvss": {
+            "type": ["object", "null"],
+            "properties": {
+              "vector_string": {
+                "type": ["string", "null"]
+              },
+              "score": {
+                "type": ["number", "null"],
+                "minimum": 0,
+                "maximum": 10
+              }
+            }
+          },
+          "cwes": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "cwe_id": { "type": "string" },
+                "name": { "type": "string" }
+              }
+            }
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["CVE", "GHSA"]
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "vulnerabilities": {
+            "type": ["array", "null"],
+            "description": "Packages affected by this advisory.",
+            "items": {
+              "$ref": "#/components/schemas/Vulnerability"
+            }
+          }
+        },
+        "required": ["ghsa_id", "summary", "severity", "published_at"]
+      },
+      "Vulnerability": {
+        "type": "object",
+        "properties": {
+          "package": {
+            "type": "object",
+            "properties": {
+              "ecosystem": {
+                "type": "string",
+                "description": "Package ecosystem (e.g. 'Go', 'npm')."
+              },
+              "name": {
+                "type": "string",
+                "description": "Package name (e.g. 'github.com/foo/bar')."
+              }
+            },
+            "required": ["ecosystem", "name"]
+          },
+          "severity": {
+            "type": ["string", "null"],
+            "enum": ["unknown", "low", "medium", "high", "critical", null]
+          },
+          "vulnerable_version_range": {
+            "type": ["string", "null"],
+            "description": "Version range string in which the package is vulnerable (e.g. '>= 1.0.0, < 1.2.3')."
+          },
+          "first_patched_version": {
+            "type": ["string", "null"],
+            "description": "First version in which the vulnerability is patched."
+          }
+        },
+        "required": ["package"]
+      }
+    }
+  }
+}

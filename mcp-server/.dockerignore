@@ -1,0 +1,30 @@
+# Exclude files not needed for the Docker build.
+# Build context is mcp-server/ (docker build ./mcp-server).
+
+# Documentation
+README.md
+Makefile
+
+# Test output and coverage
+coverage.out
+cover.html
+*.test
+
+# Local database files (data volume is mounted at runtime)
+*.db
+*.db-shm
+*.db-wal
+.go-guardian/
+
+# Secrets — must never land in the image
+.env
+.env.*
+*.hmac-key
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp

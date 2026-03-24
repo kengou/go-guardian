@@ -1,0 +1,349 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Go Vulnerability Database API",
+    "description": "The Go vulnerability database (https://vuln.go.dev) provides programmatic access to Go vulnerability data in OSV format. All entries have a package ecosystem of 'Go'.",
+    "version": "1.0.0",
+    "contact": {
+      "url": "https://pkg.go.dev/golang.org/x/vuln"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://vuln.go.dev",
+      "description": "Go Vulnerability Database"
+    }
+  ],
+  "paths": {
+    "/v1/vulns": {
+      "get": {
+        "operationId": "listVulns",
+        "summary": "List all Go vulnerabilities",
+        "description": "Returns the full list of vulnerability entries in the Go vulnerability database. Each entry is in OSV format. This endpoint returns all entries; use /v1/query to filter by module.",
+        "responses": {
+          "200": {
+            "description": "Array of all vulnerability entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OSVEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/vulns/{id}": {
+      "get": {
+        "operationId": "getVulnById",
+        "summary": "Get a single vulnerability by OSV ID",
+        "description": "Returns the full OSV entry for a single vulnerability identified by its Go vulnerability database ID (e.g. GO-2023-1234) or an alias (e.g. CVE-2023-12345).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The OSV identifier (e.g. GO-2023-1234) or an alias CVE/GHSA ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Single OSV vulnerability entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OSVEntry"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Vulnerability not found"
+          }
+        }
+      }
+    },
+    "/v1/query": {
+      "post": {
+        "operationId": "queryVulns",
+        "summary": "Query vulnerabilities by module",
+        "description": "Returns all vulnerabilities that affect a given Go module. Provide the module import path (e.g. github.com/foo/bar). Optionally include a version to restrict results to vulnerabilities affecting that specific version.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vulnerabilities matching the query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "QueryRequest": {
+        "type": "object",
+        "description": "Request body for /v1/query. Specify a module import path to retrieve all vulnerabilities affecting that module.",
+        "properties": {
+          "module": {
+            "type": "string",
+            "description": "Go module import path to query (e.g. 'github.com/foo/bar' or 'stdlib' for the standard library)."
+          },
+          "version": {
+            "type": "string",
+            "description": "Optional semver version to restrict results (e.g. 'v1.2.3'). If omitted, all vulnerabilities for the module are returned."
+          }
+        },
+        "required": ["module"]
+      },
+      "QueryResponse": {
+        "type": "object",
+        "properties": {
+          "vulns": {
+            "type": "array",
+            "description": "Vulnerability entries matching the query.",
+            "items": {
+              "$ref": "#/components/schemas/OSVEntry"
+            }
+          }
+        },
+        "required": ["vulns"]
+      },
+      "OSVEntry": {
+        "type": "object",
+        "description": "A vulnerability entry in Open Source Vulnerability (OSV) format.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The Go vulnerability database identifier (e.g. GO-2023-1234)."
+          },
+          "aliases": {
+            "type": "array",
+            "description": "Alternative identifiers for this vulnerability, such as CVE or GHSA IDs.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "related": {
+            "type": "array",
+            "description": "Related identifiers.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "description": "A short human-readable summary of the vulnerability."
+          },
+          "details": {
+            "type": "string",
+            "description": "Full description of the vulnerability in Markdown."
+          },
+          "published": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the entry was published."
+          },
+          "modified": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the entry was last modified."
+          },
+          "withdrawn": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Set if the advisory has been withdrawn."
+          },
+          "affected": {
+            "type": "array",
+            "description": "Packages and version ranges affected by this vulnerability.",
+            "items": {
+              "$ref": "#/components/schemas/Affected"
+            }
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["ADVISORY", "ARTICLE", "DETECTION", "DISCUSSION", "FIX", "GIT", "INTRODUCED", "PACKAGE", "REPORT", "WEB"]
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": ["type", "url"]
+            }
+          },
+          "credits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "contact": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          },
+          "database_specific": {
+            "type": "object",
+            "description": "Go vulnerability database-specific metadata.",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Canonical URL for this advisory on pkg.go.dev."
+              },
+              "review_status": {
+                "type": "string",
+                "enum": ["REVIEWED", "UNREVIEWED"],
+                "description": "Whether the entry has been reviewed by the Go security team."
+              }
+            }
+          }
+        },
+        "required": ["id", "published", "modified", "affected"]
+      },
+      "Affected": {
+        "type": "object",
+        "properties": {
+          "package": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Go module import path (e.g. 'github.com/foo/bar') or 'stdlib'."
+              },
+              "ecosystem": {
+                "type": "string",
+                "description": "Always 'Go' for entries in this database.",
+                "const": "Go"
+              },
+              "purl": {
+                "type": "string",
+                "description": "Package URL (purl) for the affected package."
+              }
+            },
+            "required": ["name", "ecosystem"]
+          },
+          "ranges": {
+            "type": "array",
+            "description": "Version ranges in which the package is vulnerable.",
+            "items": {
+              "$ref": "#/components/schemas/Range"
+            }
+          },
+          "versions": {
+            "type": "array",
+            "description": "Explicit list of affected versions (if ranges are not sufficient).",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ecosystem_specific": {
+            "type": "object",
+            "description": "Go-specific metadata for the affected package.",
+            "properties": {
+              "imports": {
+                "type": "array",
+                "description": "Specific packages (sub-paths) within the module that are affected.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Import path of the affected package."
+                    },
+                    "goos": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "GOOS values for which this import is affected."
+                    },
+                    "goarch": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "GOARCH values for which this import is affected."
+                    },
+                    "symbols": {
+                      "type": "array",
+                      "description": "Specific exported symbols (functions, methods, types) that are affected.",
+                      "items": { "type": "string" }
+                    }
+                  },
+                  "required": ["path"]
+                }
+              }
+            }
+          },
+          "database_specific": {
+            "type": "object"
+          }
+        },
+        "required": ["package"]
+      },
+      "Range": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["SEMVER", "ECOSYSTEM", "GIT"],
+            "description": "The versioning scheme. Go vulnerabilities use SEMVER."
+          },
+          "events": {
+            "type": "array",
+            "description": "Ordered list of events defining the vulnerable range.",
+            "items": {
+              "type": "object",
+              "description": "Each event has exactly one key: 'introduced', 'fixed', or 'last_affected'.",
+              "properties": {
+                "introduced": {
+                  "type": "string",
+                  "description": "Version at which the vulnerability was introduced. '0' means all versions before a fix."
+                },
+                "fixed": {
+                  "type": "string",
+                  "description": "Version in which the vulnerability was fixed."
+                },
+                "last_affected": {
+                  "type": "string",
+                  "description": "Last affected version (used when no fix is available)."
+                }
+              }
+            }
+          }
+        },
+        "required": ["type", "events"]
+      }
+    }
+  }
+}
