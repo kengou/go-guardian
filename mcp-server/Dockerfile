@@ -1,6 +1,6 @@
 # Build stage — runs on the build machine's native platform for speed.
 # Cross-compilation is handled by GOOS/GOARCH, not by emulation.
-FROM --platform=${BUILDPLATFORM} golang:1.26 AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.26@sha256:595c7847cff97c9a9e76f015083c481d26078f961c9c8dca3923132f51fe12f1 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # Runtime stage — distroless/static has no shell, no libc, no package manager.
 # Safe for CGO_ENABLED=0 binaries; nonroot runs as uid/gid 65532.
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39
 
 LABEL org.opencontainers.image.source="https://github.com/kengou/go-guardian"
 LABEL org.opencontainers.image.description="go-guardian MCP server — self-learning Go development assistant"
