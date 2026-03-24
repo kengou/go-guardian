@@ -8,21 +8,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// knowledgeCall is the low-level helper used by knowledge tests.
-// It creates a fresh in-memory store (via newTestStore from learn_test.go),
-// builds a CallToolRequest from args, and calls handleQueryKnowledge.
-func knowledgeCall(t *testing.T, args map[string]interface{}) string {
-	t.Helper()
-	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = args
-	result, err := handleQueryKnowledge(context.Background(), req, store)
-	if err != nil {
-		t.Fatalf("handleQueryKnowledge: %v", err)
-	}
-	return result
-}
-
 // mustStore is a test helper that fatals if err is non-nil.
 func mustStore(t *testing.T, err error) {
 	t.Helper()
