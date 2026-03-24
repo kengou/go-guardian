@@ -73,8 +73,8 @@ func RegisterLearnFromLint(s *server.MCPServer, store *db.Store) {
 // without needing a live MCP transport.
 func learnFromLintHandler(store *db.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		diff, _ := req.Params.Arguments["diff"].(string)
-		lintOutput, _ := req.Params.Arguments["lint_output"].(string)
+		diff := req.GetString("diff", "")
+		lintOutput := req.GetString("lint_output", "")
 
 		// Edge case: nothing useful provided.
 		if strings.TrimSpace(diff) == "" && strings.TrimSpace(lintOutput) == "" {

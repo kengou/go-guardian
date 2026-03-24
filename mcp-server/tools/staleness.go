@@ -58,7 +58,7 @@ func RegisterCheckStaleness(s *server.MCPServer, store *db.Store) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		rawPath, _ := req.Params.Arguments["project_path"].(string)
+		rawPath := req.GetString("project_path", "")
 		rawPath = strings.TrimSpace(rawPath)
 		if rawPath == "" {
 			return mcp.NewToolResultError("project_path is required"), nil

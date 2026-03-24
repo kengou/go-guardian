@@ -42,7 +42,7 @@ func RegisterCheckDeps(s *server.MCPServer, store *db.Store) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		raw, _ := req.Params.Arguments["modules"].([]interface{})
+		raw, _ := req.GetArguments()["modules"].([]interface{})
 		if len(raw) == 0 {
 			return mcp.NewToolResultText("Dependency Analysis:\n\n(no modules provided)"), nil
 		}

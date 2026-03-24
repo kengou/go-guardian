@@ -44,7 +44,7 @@ func callLearnTool(t *testing.T, store *db.Store, diff, lintOutput, project stri
 	if len(result.Content) == 0 {
 		t.Fatal("result has no content")
 	}
-	tc, ok := result.Content[0].(mcp.TextContent)
+	tc, ok := mcp.AsTextContent(result.Content[0])
 	if !ok {
 		t.Fatalf("expected mcp.TextContent, got %T", result.Content[0])
 	}

@@ -47,8 +47,8 @@ func RegisterSuggestFix(s *server.MCPServer, store *db.Store) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		snippet, _ := req.Params.Arguments["code_snippet"].(string)
-		issueType, _ := req.Params.Arguments["issue_type"].(string)
+		snippet := req.GetString("code_snippet", "")
+		issueType := req.GetString("issue_type", "")
 
 		if strings.TrimSpace(snippet) == "" {
 			return mcp.NewToolResultText(

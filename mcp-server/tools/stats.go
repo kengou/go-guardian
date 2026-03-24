@@ -26,7 +26,7 @@ func RegisterGetPatternStats(s *server.MCPServer, store *db.Store) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		project, _ := req.Params.Arguments["project"].(string)
+		project := req.GetString("project", "")
 
 		stats, err := store.GetPatternStats(project)
 		if err != nil {

@@ -30,8 +30,8 @@ func RegisterCheckOWASP(s *server.MCPServer, store *db.Store, projectRoot string
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		rawPath, ok := req.Params.Arguments["path"].(string)
-		if !ok || strings.TrimSpace(rawPath) == "" {
+		rawPath := req.GetString("path", "")
+		if strings.TrimSpace(rawPath) == "" {
 			return mcp.NewToolResultText("error: 'path' parameter is required"), nil
 		}
 		scanPath := strings.TrimSpace(rawPath)

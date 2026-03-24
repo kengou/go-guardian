@@ -39,8 +39,8 @@ func RegisterQueryKnowledge(s *server.MCPServer, store *db.Store) {
 
 // handleQueryKnowledge contains the core logic, separated for testability.
 func handleQueryKnowledge(_ context.Context, req mcp.CallToolRequest, store *db.Store) (string, error) {
-	filePath, _ := req.Params.Arguments["file_path"].(string)
-	codeContext, _ := req.Params.Arguments["code_context"].(string)
+	filePath := req.GetString("file_path", "")
+	codeContext := req.GetString("code_context", "")
 
 	// Truncate code_context to 1000 chars to keep queries lean.
 	if len(codeContext) > 1000 {
