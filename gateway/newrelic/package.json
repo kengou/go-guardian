@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "mcp-remote": "0.1.16"
+    "mcp-remote": "0.1.38"
   }
 }
