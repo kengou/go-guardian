@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/mark3labs/mcp-go v0.46.0
-	modernc.org/sqlite v1.47.0
+	modernc.org/sqlite v1.48.0
 )
 
 require (
