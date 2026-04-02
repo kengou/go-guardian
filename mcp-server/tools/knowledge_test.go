@@ -36,7 +36,7 @@ func TestQueryKnowledgeEmptyDB(t *testing.T) {
 	// either the sentinel or a pattern block is acceptable. Error is not.
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]interface{}{}
-	result, handlerErr := handleQueryKnowledge(context.Background(), req, store)
+	result, handlerErr := handleQueryKnowledge(context.Background(), req, store, "")
 	if handlerErr != nil {
 		t.Fatalf("handleQueryKnowledge returned error on empty store: %v", handlerErr)
 	}
@@ -84,7 +84,7 @@ func TestQueryKnowledgeSentinelDirect(t *testing.T) {
 		"file_path":    "foo_test.go",
 		"code_context": "",
 	}
-	result, handlerErr := handleQueryKnowledge(context.Background(), req, store)
+	result, handlerErr := handleQueryKnowledge(context.Background(), req, store, "")
 	if handlerErr != nil {
 		t.Fatalf("unexpected handler error: %v", handlerErr)
 	}
@@ -93,36 +93,44 @@ func TestQueryKnowledgeSentinelDirect(t *testing.T) {
 	}
 }
 
-// TestQueryKnowledgeFileGlobRouting verifies that fileGlobForPath routes file
-// paths (including absolute paths) to the correct glob pattern.
+// TestQueryKnowledgeFileGlobRouting verifies that fileGlobFor routes file
+// basenames to the correct glob pattern.
 func TestQueryKnowledgeFileGlobRouting(t *testing.T) {
 	cases := []struct {
-		filePath string
+		basename string
 		wantGlob string
 	}{
 		// _test.go files
 		{"handler_test.go", "*_test.go"},
-		{"/srv/app/user_test.go", "*_test.go"},
+		{"user_test.go", "*_test.go"},
 		// _handler.go files
 		{"auth_handler.go", "*_handler.go"},
-		{"/pkg/http/proxy_handler.go", "*_handler.go"},
+		{"proxy_handler.go", "*_handler.go"},
 		// _middleware.go files
 		{"logging_middleware.go", "*_middleware.go"},
-		{"/internal/mid/cors_middleware.go", "*_middleware.go"},
+		{"cors_middleware.go", "*_middleware.go"},
+		// domain-specific suffixes (from fileGlobFor)
+		{"user_service.go", "*_service.go"},
+		{"user_controller.go", "*_controller.go"},
+		{"user_repository.go", "*_repository.go"},
+		// bare-word domain stems
+		{"handler.go", "*_handler.go"},
+		{"server.go", "*_server.go"},
+		{"client.go", "*_client.go"},
 		// generic .go files
 		{"main.go", "*.go"},
-		{"service.go", "*.go"},
+		{"utils.go", "*.go"},
 		// empty path
 		{"", "*.go"},
 	}
 
 	for _, tc := range cases {
 		tc := tc
-		t.Run(tc.filePath, func(t *testing.T) {
+		t.Run(tc.basename, func(t *testing.T) {
 			t.Helper()
-			got := fileGlobForPath(tc.filePath)
+			got := fileGlobFor(tc.basename)
 			if got != tc.wantGlob {
-				t.Errorf("fileGlobForPath(%q) = %q, want %q", tc.filePath, got, tc.wantGlob)
+				t.Errorf("fileGlobFor(%q) = %q, want %q", tc.basename, got, tc.wantGlob)
 			}
 		})
 	}
@@ -160,11 +168,11 @@ func TestQueryKnowledgeWithPatterns(t *testing.T) {
 
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]interface{}{
-		"file_path":    "service.go",
+		"file_path":    "main.go",
 		"code_context": "if err := doThing(); err != nil { return err }",
 		"project":      "myproject",
 	}
-	result, err := handleQueryKnowledge(context.Background(), req, store)
+	result, err := handleQueryKnowledge(context.Background(), req, store, "")
 	if err != nil {
 		t.Fatalf("handleQueryKnowledge: %v", err)
 	}
@@ -283,7 +291,7 @@ func TestQueryKnowledgeLintCap(t *testing.T) {
 		"file_path":    "main.go",
 		"code_context": "",
 	}
-	result, err := handleQueryKnowledge(context.Background(), req, store)
+	result, err := handleQueryKnowledge(context.Background(), req, store, "")
 	if err != nil {
 		t.Fatalf("handleQueryKnowledge: %v", err)
 	}
@@ -343,11 +351,64 @@ func TestQueryKnowledgeCodeContextTruncation(t *testing.T) {
 		"file_path":    "service.go",
 		"code_context": strings.Repeat("x", 5000),
 	}
-	result, err := handleQueryKnowledge(context.Background(), req, store)
+	result, err := handleQueryKnowledge(context.Background(), req, store, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result == "" {
 		t.Error("expected non-empty result")
+	}
+}
+
+// TestQueryKnowledgeWithSessionFindings verifies that session findings for
+// the file are included in the output when a sessionID is active.
+func TestQueryKnowledgeWithSessionFindings(t *testing.T) {
+	store := newTestStore(t)
+	sid := "test-session-knowledge"
+
+	_, _ = store.InsertSessionFinding(sid, "reviewer", "race-condition", "service.go", "Unsync map access", "HIGH")
+	_, _ = store.InsertSessionFinding(sid, "security", "sqli", "handler.go", "String concat query", "CRITICAL")
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{
+		"file_path":    "service.go",
+		"code_context": "",
+	}
+	result, err := handleQueryKnowledge(context.Background(), req, store, sid)
+	if err != nil {
+		t.Fatalf("handleQueryKnowledge: %v", err)
+	}
+
+	// Should include session findings for service.go.
+	if !strings.Contains(result, "SESSION FINDINGS") {
+		t.Errorf("expected SESSION FINDINGS section:\n%s", result)
+	}
+	if !strings.Contains(result, "race-condition") {
+		t.Errorf("expected race-condition finding:\n%s", result)
+	}
+	// handler.go finding should NOT appear (file filter).
+	if strings.Contains(result, "handler.go") {
+		t.Errorf("handler.go finding should not appear for service.go query:\n%s", result)
+	}
+}
+
+// TestQueryKnowledgeNoSessionFindings verifies that session findings
+// are not included when sessionID is empty.
+func TestQueryKnowledgeNoSessionFindings(t *testing.T) {
+	store := newTestStore(t)
+	_, _ = store.InsertSessionFinding("some-session", "reviewer", "bug", "service.go", "A bug", "HIGH")
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{
+		"file_path":    "service.go",
+		"code_context": "",
+	}
+	result, err := handleQueryKnowledge(context.Background(), req, store, "")
+	if err != nil {
+		t.Fatalf("handleQueryKnowledge: %v", err)
+	}
+
+	if strings.Contains(result, "SESSION FINDINGS") {
+		t.Errorf("session findings should not appear without sessionID:\n%s", result)
 	}
 }

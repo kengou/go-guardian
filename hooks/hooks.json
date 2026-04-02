@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(*.go)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-go.sh",
+            "statusMessage": "Checking learned patterns..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Write(*.go)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-go.sh",
+            "statusMessage": "Checking learned patterns..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(golangci-lint *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash.sh",
+            "async": true,
+            "statusMessage": "Learning from lint findings..."
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/on-task-completed.sh",
+            "statusMessage": "Verifying task quality..."
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "matcher": "go.mod",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/on-gomod-change.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

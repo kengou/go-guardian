@@ -69,3 +69,31 @@ CREATE INDEX IF NOT EXISTS idx_owasp_findings_category ON owasp_findings(categor
 CREATE INDEX IF NOT EXISTS idx_vuln_cache_module ON vuln_cache(module);
 CREATE INDEX IF NOT EXISTS idx_scan_history_project ON scan_history(project);
 CREATE INDEX IF NOT EXISTS idx_anti_patterns_category ON anti_patterns(category);
+
+CREATE TABLE IF NOT EXISTS scan_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_type TEXT NOT NULL,
+    project TEXT NOT NULL,
+    findings_count INTEGER NOT NULL DEFAULT 0,
+    findings_detail TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_snapshots_lookup
+    ON scan_snapshots(project, scan_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    finding_type TEXT NOT NULL,
+    file_path TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'MEDIUM',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_findings_session
+    ON session_findings(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_findings_lookup
+    ON session_findings(session_id, agent);

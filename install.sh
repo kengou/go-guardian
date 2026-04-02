@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# go-guardian installer
+# go-guardian installer (standalone fallback)
+# Prefer plugin marketplace installation:
+#   claude plugin add github:kengou/go-guardian
+# This script is the fallback for environments without plugin support.
 # Usage: ./install.sh [--global] [--project PATH]
 
 set -euo pipefail
@@ -134,8 +137,12 @@ done
 info "Installing skills -> ${SKILLS_DIR}/"
 for skill_dir in "${SCRIPT_DIR}/skills/"/*/; do
   skill_name="$(basename "${skill_dir}")"
-  mkdir -p "${SKILLS_DIR}/${skill_name}"
-  cp "${skill_dir}SKILL.md" "${SKILLS_DIR}/${skill_name}/SKILL.md"
+  dest_dir="${SKILLS_DIR}/${skill_name}"
+  mkdir -p "${dest_dir}"
+  skill_file=$(find "${skill_dir}" -maxdepth 1 -iname "skill.md" -print -quit 2>/dev/null)
+  if [ -n "${skill_file}" ]; then
+      cp "${skill_file}" "${dest_dir}/$(basename "${skill_file}")"
+  fi
   info "  ${skill_name}/SKILL.md"
 done
 
@@ -200,7 +207,10 @@ echo -e "${GREEN}======================================================${NC}"
 echo -e "${GREEN}   go-guardian installed successfully!${NC}"
 echo -e "${GREEN}======================================================${NC}"
 echo ""
-echo "Next steps:"
+echo -e "${YELLOW}NOTE: Plugin marketplace installation is now preferred:${NC}"
+echo "  claude plugin add github:kengou/go-guardian"
+echo ""
+echo "If you prefer this standalone installation, continue with:"
 echo ""
 echo "  1. Merge the MCP + hooks config into your Claude Code settings:"
 echo "     * Project-level:  ${PROJECT_ROOT}/.claude/settings.json"

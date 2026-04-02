@@ -38,10 +38,18 @@ data:
                   schema:
                     file: /etc/go-guardian/openapi/go-vuln.json
                   host: vuln.go.dev
+              - name: newrelic
+                stdio:
+                  cmd: /shared/newrelic-mcp/bin/node
+                  args: ["/shared/newrelic-mcp/app/bridge.mjs"]
+                  env:
+                    NEW_RELIC_API_KEY: "${NEW_RELIC_API_KEY}"
+                    NEW_RELIC_REGION: "${NEW_RELIC_REGION}"
             policies:
               cors:
                 allowOrigins:
-                - "http://localhost:*"
+                - "http://localhost:3000"
+                - "http://localhost:3001"
                 allowHeaders:
                 - content-type
                 - mcp-protocol-version

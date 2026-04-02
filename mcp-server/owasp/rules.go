@@ -4,6 +4,7 @@
 package owasp
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,6 +14,18 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+)
+
+// Package-level compiled regexes — compiled once at init rather than per call.
+var (
+	reMD5            = regexp.MustCompile(`md5\.New\(\)|md5\.Sum\(`)
+	reSHA1           = regexp.MustCompile(`sha1\.New\(\)|sha1\.Sum\(`)
+	reSQLInjection   = regexp.MustCompile(`(?i)fmt\.Sprintf\s*\(\s*"[^"]*(?:SELECT|INSERT|UPDATE|DELETE)`)
+	reCmdInjection   = regexp.MustCompile(`exec\.Command\([^)]*\+`)
+	reUnsafeTemplate = regexp.MustCompile(`template\.(HTML|JS|URL)\(`)
+	reWildcardCORS   = regexp.MustCompile(`(?i)(AllowedOrigins\s*[=:]\s*\[?"?\*"?|Access-Control-Allow-Origin[^"]*"\*")`)
+	reSensitiveLog   = regexp.MustCompile(`(?i)(log\.Printf|log\.Println|fmt\.Fprintf\s*\(\s*os\.Stderr)[^\n]*(password|secret|token)`)
+	reSSRF           = regexp.MustCompile(`http\.(Get|Post|NewRequest)\s*\(\s*[^"'\s]`)
 )
 
 // Severity represents the criticality of a security finding.
@@ -50,14 +63,14 @@ type Rule struct {
 
 // lineNumber returns the 1-based line number for the given byte offset in src.
 func lineNumber(src []byte, offset int) int {
-	return strings.Count(string(src[:offset]), "\n") + 1
+	return bytes.Count(src[:offset], []byte{'\n'}) + 1
 }
 
 // lineAt returns the trimmed text of the 1-based line from src.
 func lineAt(src []byte, line int) string {
-	lines := strings.SplitN(string(src), "\n", line+1)
-	if line-1 < len(lines) {
-		return strings.TrimSpace(lines[line-1])
+	lines := bytes.SplitN(src, []byte{'\n'}, line+1)
+	if line <= len(lines) {
+		return string(lines[line-1])
 	}
 	return ""
 }
@@ -98,14 +111,14 @@ func DefaultRules() []Rule {
 			"A02", SeverityCritical,
 			"Weak hash: MD5 is not collision-resistant. Use crypto/bcrypt or argon2 for passwords.",
 			"Replace md5 with crypto/bcrypt (passwords) or sha256/sha512 (integrity checks).",
-			regexp.MustCompile(`md5\.New\(\)|md5\.Sum\(`),
+			reMD5,
 		),
 
 		regexRule(
 			"A02", SeverityHigh,
 			"Weak hash: SHA-1 is deprecated for security use. Use SHA-256 or stronger.",
 			"Replace sha1 with crypto/sha256 or crypto/sha512.",
-			regexp.MustCompile(`sha1\.New\(\)|sha1\.Sum\(`),
+			reSHA1,
 		),
 
 		// A02: hardcoded secrets — AST-based
@@ -132,21 +145,21 @@ func DefaultRules() []Rule {
 			"A03", SeverityCritical,
 			"Possible SQL injection via string formatting. Use parameterized queries.",
 			"Replace fmt.Sprintf for SQL with database/sql parameterized queries (db.Query/db.Exec with ? placeholders).",
-			regexp.MustCompile(`(?i)fmt\.Sprintf\s*\(\s*"[^"]*(?:SELECT|INSERT|UPDATE|DELETE)`),
+			reSQLInjection,
 		),
 
 		regexRule(
 			"A03", SeverityHigh,
 			"Possible command injection. Validate and sanitize command arguments.",
 			"Avoid building exec.Command arguments via string concatenation. Use a fixed command with a validated argument list.",
-			regexp.MustCompile(`exec\.Command\([^)]*\+`),
+			reCmdInjection,
 		),
 
 		regexRule(
 			"A03", SeverityMedium,
 			"Unsafe HTML/JS/URL cast bypasses template auto-escaping.",
 			"Avoid template.HTML/JS/URL conversions unless the value is from a fully trusted source. Prefer contextual auto-escaping.",
-			regexp.MustCompile(`template\.(HTML|JS|URL)\(`),
+			reUnsafeTemplate,
 		),
 
 		// ── A05 Security Misconfiguration ───────────────────────────────────
@@ -164,7 +177,7 @@ func DefaultRules() []Rule {
 			"A05", SeverityMedium,
 			"Wildcard CORS origin. Restrict to known origins in production.",
 			"Replace the wildcard with an explicit allowlist of permitted origins.",
-			regexp.MustCompile(`(?i)(AllowedOrigins\s*[=:]\s*\[?"?\*"?|Access-Control-Allow-Origin[^"]*"\*")`),
+			reWildcardCORS,
 		),
 
 		// ── A09 Logging Failures ─────────────────────────────────────────────
@@ -173,7 +186,7 @@ func DefaultRules() []Rule {
 			"A09", SeverityHigh,
 			"Potential sensitive data logged. Remove or mask sensitive fields.",
 			"Never log raw passwords, tokens, or secrets. Use a structured logger with field redaction.",
-			regexp.MustCompile(`(?i)(log\.Printf|log\.Println|fmt\.Fprintf\s*\(\s*os\.Stderr)[^\n]*(password|secret|token)`),
+			reSensitiveLog,
 		),
 
 		// ── A10 SSRF ────────────────────────────────────────────────────────
@@ -184,7 +197,7 @@ func DefaultRules() []Rule {
 			"Parse the URL with url.Parse, verify the host against an explicit allowlist, then make the request.",
 			// Match http.Get/Post/NewRequest where the first argument starts
 			// with a non-quote character (i.e. a variable, not a string literal).
-			regexp.MustCompile(`http\.(Get|Post|NewRequest)\s*\(\s*[^"'\s]`),
+			reSSRF,
 		),
 	}
 }

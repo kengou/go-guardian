@@ -1,0 +1,12 @@
+{
+  "name": "go-guardian-marketplace",
+  "owner": {
+    "name": "kengou"
+  },
+  "plugins": [
+    {
+      "name": "go-guardian",
+      "source": "./"
+    }
+  ]
+}

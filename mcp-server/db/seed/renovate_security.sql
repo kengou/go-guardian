@@ -1,0 +1,8 @@
+-- Security and vulnerability rules
+INSERT OR IGNORE INTO renovate_rules (rule_id, category, title, description, dont_config, do_config, severity) VALUES
+('SEC-1', 'security', 'Enable vulnerability alerts', 'Renovate should detect and prioritize known vulnerabilities in dependencies.', '{"vulnerabilityAlerts": {"enabled": false}}', '{"vulnerabilityAlerts": {"enabled": true, "labels": ["security"]}}', 'CRITICAL'),
+('SEC-2', 'security', 'Prioritize security PRs', 'Security PRs should have higher priority than regular updates to reduce exposure.', '{}', '{"packageRules": [{"matchCategories": ["security"], "prPriority": 10, "labels": ["security", "priority"]}]}', 'WARN'),
+('SEC-3', 'security', 'Automerge security patches', 'Security patch updates should be fast-tracked with automerge regardless of other automerge settings.', '{}', '{"packageRules": [{"matchCategories": ["security"], "matchUpdateTypes": ["patch"], "automerge": true}]}', 'WARN'),
+('SEC-4', 'security', 'Relax dev dependency severity', 'Dev dependencies are not deployed — low/medium vulnerabilities can be deprioritized.', '{}', '{"packageRules": [{"matchDepTypes": ["devDependencies"], "matchCategories": ["security"], "prPriority": -1}]}', 'INFO'),
+('SEC-5', 'security', 'Enable OSV vulnerability alerts', 'OSV provides broader vulnerability coverage than GitHub advisories alone.', '{}', '{"osvVulnerabilityAlerts": true}', 'WARN'),
+('SEC-6', 'security', 'Pin dependencies for security', 'Pinning versions prevents supply chain attacks from compromised latest tags.', '{"rangeStrategy": "auto"}', '{"rangeStrategy": "pin"}', 'WARN');

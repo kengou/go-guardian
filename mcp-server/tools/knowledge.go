@@ -12,9 +12,10 @@ import (
 )
 
 // RegisterQueryKnowledge registers the query_knowledge MCP tool on s.
-// The tool surfaces learned lint patterns, anti-patterns, and OWASP findings
-// that are relevant to the file and code context provided by the caller.
-func RegisterQueryKnowledge(s *server.MCPServer, store *db.Store) {
+// The tool surfaces learned lint patterns, anti-patterns, OWASP findings,
+// and session findings relevant to the file and code context provided by the caller.
+// If sessionID is non-empty, session findings for the file are also included.
+func RegisterQueryKnowledge(s *server.MCPServer, store *db.Store, sessionID string) {
 	tool := mcp.NewTool("query_knowledge",
 		mcp.WithDescription("Return learned Go patterns, anti-patterns, and OWASP findings relevant to the file being written."),
 		mcp.WithString("file_path",
@@ -29,7 +30,7 @@ func RegisterQueryKnowledge(s *server.MCPServer, store *db.Store) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		result, err := handleQueryKnowledge(ctx, req, store)
+		result, err := handleQueryKnowledge(ctx, req, store, sessionID)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -38,7 +39,7 @@ func RegisterQueryKnowledge(s *server.MCPServer, store *db.Store) {
 }
 
 // handleQueryKnowledge contains the core logic, separated for testability.
-func handleQueryKnowledge(_ context.Context, req mcp.CallToolRequest, store *db.Store) (string, error) {
+func handleQueryKnowledge(_ context.Context, req mcp.CallToolRequest, store *db.Store, sessionID string) (string, error) {
 	filePath := req.GetString("file_path", "")
 	codeContext := req.GetString("code_context", "")
 
@@ -48,7 +49,7 @@ func handleQueryKnowledge(_ context.Context, req mcp.CallToolRequest, store *db.
 	}
 
 	// 1. Determine the file glob from the file path.
-	glob := fileGlobForPath(filePath)
+	glob := fileGlobFor(filepath.Base(filePath))
 
 	// 2. Query lint patterns (limit 10, sorted by frequency via the store).
 	lintPatterns, err := store.QueryPatterns(glob, codeContext, 10)
@@ -69,31 +70,22 @@ func handleQueryKnowledge(_ context.Context, req mcp.CallToolRequest, store *db.
 		return "", fmt.Errorf("querying OWASP findings: %w", err)
 	}
 
-	// 5. Check whether anything was found at all.
-	if len(lintPatterns) == 0 && len(antiPatterns) == 0 && len(owaspFindings) == 0 {
+	// 5. Query session findings for this file (if session is active).
+	var sessionFindings []db.SessionFinding
+	if sessionID != "" && filePath != "" {
+		sessionFindings, err = store.GetSessionFindingsByFile(sessionID, filePath)
+		if err != nil {
+			return "", fmt.Errorf("querying session findings: %w", err)
+		}
+	}
+
+	// 6. Check whether anything was found at all.
+	if len(lintPatterns) == 0 && len(antiPatterns) == 0 && len(owaspFindings) == 0 && len(sessionFindings) == 0 {
 		return "No learned patterns for this context yet.", nil
 	}
 
-	// 6. Format and return the context block.
-	return formatKnowledge(lintPatterns, antiPatterns, owaspFindings), nil
-}
-
-// fileGlobForPath derives a file-type glob from a file path.
-func fileGlobForPath(filePath string) string {
-	if filePath == "" {
-		return "*.go"
-	}
-	base := filepath.Base(filePath)
-	switch {
-	case strings.HasSuffix(base, "_test.go"):
-		return "*_test.go"
-	case strings.HasSuffix(base, "_handler.go"):
-		return "*_handler.go"
-	case strings.HasSuffix(base, "_middleware.go"):
-		return "*_middleware.go"
-	default:
-		return "*.go"
-	}
+	// 7. Format and return the context block.
+	return formatKnowledge(lintPatterns, antiPatterns, owaspFindings, sessionFindings), nil
 }
 
 // categoryFromContext maps keywords in the code snippet to an anti-pattern category.
@@ -132,9 +124,9 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// formatKnowledge assembles the injectable context block from the three result
-// slices. It caps lint patterns at 5 and anti-patterns at 3.
-func formatKnowledge(lintPatterns []db.LintPattern, antiPatterns []db.AntiPattern, owaspFindings []db.OWASPFinding) string {
+// formatKnowledge assembles the injectable context block from the result
+// slices. It caps lint patterns at 5, anti-patterns at 3, and session findings at 5.
+func formatKnowledge(lintPatterns []db.LintPattern, antiPatterns []db.AntiPattern, owaspFindings []db.OWASPFinding, sessionFindings ...[]db.SessionFinding) string {
 	var b strings.Builder
 	b.WriteString("LEARNED PATTERNS FOR THIS CONTEXT:\n")
 
@@ -168,6 +160,22 @@ func formatKnowledge(lintPatterns []db.LintPattern, antiPatterns []db.AntiPatter
 		for _, f := range owaspFindings {
 			fmt.Fprintf(&b, "• [owasp:%s] %s\n", f.Category, f.Finding)
 			fmt.Fprintf(&b, "  → FIX: %s\n", f.FixPattern)
+		}
+	}
+
+	// Session findings — up to 5 (from other agents in the current session).
+	if len(sessionFindings) > 0 && len(sessionFindings[0]) > 0 {
+		sf := sessionFindings[0]
+		if len(sf) > 5 {
+			sf = sf[:5]
+		}
+		b.WriteString("\nSESSION FINDINGS (from other agents):\n")
+		for _, f := range sf {
+			fmt.Fprintf(&b, "• [%s:%s] %s", f.Severity, f.Agent, f.FindingType)
+			if f.FilePath != "" {
+				fmt.Fprintf(&b, " (%s)", f.FilePath)
+			}
+			fmt.Fprintf(&b, "\n  %s\n", f.Description)
 		}
 	}
 

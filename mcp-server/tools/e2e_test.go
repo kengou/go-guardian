@@ -46,7 +46,7 @@ func TestE2ELearnQuerySuggest(t *testing.T) {
 		"code_context": "rows.Close()",
 	}
 
-	queryResult, err := handleQueryKnowledge(context.Background(), queryReq, store)
+	queryResult, err := handleQueryKnowledge(context.Background(), queryReq, store, "")
 	if err != nil {
 		t.Fatalf("handleQueryKnowledge error: %v", err)
 	}

@@ -1,36 +1,32 @@
 #!/usr/bin/env bash
 # go-guardian: PostToolUse(Bash) hook -- learn from lint output
-# STDIN receives JSON: {"tool":"Bash","input":{"command":"..."},"output":"..."}
+# Only spawned for golangci-lint commands (filtered by "if": "Bash(golangci-lint *)" in hooks.json).
+# STDIN receives JSON: {"tool_name":"Bash","tool_input":{"command":"..."},"tool_response":"..."}
+# Dual-mode: works as plugin (CLAUDE_PLUGIN_DATA set) or standalone (.go-guardian/).
 
 set -euo pipefail
 
-PROJECT_PATH="${PWD}"
-MCP_BIN="${PROJECT_PATH}/.go-guardian/go-guardian-mcp"
-DB_PATH="${PROJECT_PATH}/.go-guardian/guardian.db"
-LINT_TMP="/tmp/go-guardian-lint-$$.txt"
+# ── Resolve paths (plugin vs fallback) ───────────────────────────────────────
+if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+  MCP_BIN="${CLAUDE_PLUGIN_DATA}/go-guardian-mcp"
+  DB_PATH="${CLAUDE_PLUGIN_DATA}/guardian.db"
+else
+  MCP_BIN="${PWD}/.go-guardian/go-guardian-mcp"
+  DB_PATH="${PWD}/.go-guardian/guardian.db"
+fi
 
 # Only run if binary exists.
 if [[ ! -x "${MCP_BIN}" ]]; then
   exit 0
 fi
 
+LINT_TMP="/tmp/go-guardian-lint-$$.txt"
+
 # Read hook payload from stdin.
 PAYLOAD=$(cat)
 
-# Check if the command was a golangci-lint run.
-COMMAND=$(echo "${PAYLOAD}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('input',{}).get('command',''))" 2>/dev/null || true)
-
-if [[ -z "${COMMAND}" ]]; then
-  exit 0
-fi
-
-# Only proceed if golangci-lint was in the command.
-if ! echo "${COMMAND}" | grep -q "golangci-lint"; then
-  exit 0
-fi
-
 # Extract lint output from the hook payload.
-LINT_OUTPUT=$(echo "${PAYLOAD}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('output',''))" 2>/dev/null || true)
+LINT_OUTPUT=$(echo "${PAYLOAD}" | jq -r '.tool_response // .output // ""' 2>/dev/null || true)
 
 if [[ -z "${LINT_OUTPUT}" ]]; then
   exit 0
@@ -43,7 +39,7 @@ DIFF=$(git diff HEAD 2>/dev/null || true)
 echo "${LINT_OUTPUT}" > "${LINT_TMP}"
 
 # Call learn_from_lint via the MCP server's --learn flag (one-shot mode).
-PROJECT_ID=$(basename "$(dirname "${PROJECT_PATH}")")/$(basename "${PROJECT_PATH}")
+PROJECT_ID=$(basename "$(dirname "${PWD}")")/$(basename "${PWD}")
 
 "${MCP_BIN}" \
   --learn \
@@ -54,26 +50,5 @@ PROJECT_ID=$(basename "$(dirname "${PROJECT_PATH}")")/$(basename "${PROJECT_PATH
   2>/dev/null || true
 
 rm -f "${LINT_TMP}"
-
-# ── Trigger background prefetch on dependency changes ─────────────────────────
-if echo "${COMMAND}" | grep -qE 'go (get|mod tidy|mod download)'; then
-  if [[ -x "${MCP_BIN}" ]] && [[ -f "${PROJECT_PATH}/go.mod" ]]; then
-    NVD_KEY="${NVD_API_KEY:-}"
-    if [[ -n "${NVD_KEY}" ]]; then
-      "${MCP_BIN}" \
-        --prefetch \
-        --db "${DB_PATH}" \
-        --go-mod "${PROJECT_PATH}/go.mod" \
-        --nvd-key "${NVD_KEY}" \
-        >/tmp/go-guardian-prefetch-$$.log 2>&1 &
-    else
-      "${MCP_BIN}" \
-        --prefetch \
-        --db "${DB_PATH}" \
-        --go-mod "${PROJECT_PATH}/go.mod" \
-        >/tmp/go-guardian-prefetch-$$.log 2>&1 &
-    fi
-  fi
-fi
 
 exit 0

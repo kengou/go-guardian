@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # go-guardian: PreToolUse(Edit) hook -- prevention injection
-# STDIN receives JSON: {"tool":"Edit","input":{"file_path":"...","old_string":"...","new_string":"..."}}
+# Only spawned for *.go files (filtered by "if": "Edit(*.go)" in hooks.json).
+# STDIN receives JSON: {"tool_name":"Edit","tool_input":{"file_path":"...","old_string":"...","new_string":"..."}}
+# Dual-mode: works as plugin (CLAUDE_PLUGIN_DATA set) or standalone (.go-guardian/).
 
 set -euo pipefail
 
-PROJECT_PATH="${PWD}"
-MCP_BIN="${PROJECT_PATH}/.go-guardian/go-guardian-mcp"
-DB_PATH="${PROJECT_PATH}/.go-guardian/guardian.db"
+# ── Resolve paths (plugin vs fallback) ───────────────────────────────────────
+if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+  MCP_BIN="${CLAUDE_PLUGIN_DATA}/go-guardian-mcp"
+  DB_PATH="${CLAUDE_PLUGIN_DATA}/guardian.db"
+else
+  MCP_BIN="${PWD}/.go-guardian/go-guardian-mcp"
+  DB_PATH="${PWD}/.go-guardian/guardian.db"
+fi
 
 # Only run if binary exists.
 if [[ ! -x "${MCP_BIN}" ]]; then
@@ -17,27 +24,21 @@ fi
 PAYLOAD=$(cat)
 
 # Extract file path.
-FILE_PATH=$(echo "${PAYLOAD}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('input',{}).get('file_path',''))" 2>/dev/null || true)
+FILE_PATH=$(echo "${PAYLOAD}" | jq -r '.tool_input.file_path // ""' 2>/dev/null || true)
 
-# Only care about .go files.
-if [[ -z "${FILE_PATH}" ]] || [[ "${FILE_PATH}" != *.go ]]; then
+if [[ -z "${FILE_PATH}" ]]; then
   exit 0
 fi
 
 # Use the new_string as code context.
-CODE_CONTEXT=$(echo "${PAYLOAD}" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-new_string = d.get('input', {}).get('new_string', '')
-print(new_string[:200].replace('\n', ' '))
-" 2>/dev/null || true)
+CODE_CONTEXT=$(echo "${PAYLOAD}" | jq -r '.tool_input.new_string // "" | .[0:200] | gsub("\n"; " ")' 2>/dev/null || true)
 
 # Query knowledge base.
-PATTERNS=$("${MCP_BIN}" \
+# Pass code context via stdin for security (avoids CLI arg injection).
+PATTERNS=$(echo "${CODE_CONTEXT}" | "${MCP_BIN}" \
   --query-knowledge \
   --db "${DB_PATH}" \
   --file-path "${FILE_PATH}" \
-  --code-context "${CODE_CONTEXT}" \
   2>/dev/null || true)
 
 if [[ -z "${PATTERNS}" ]] || [[ "${PATTERNS}" == "null" ]]; then

@@ -26,6 +26,14 @@ kind: Kustomization
 #   3. Build and push the go-guardian-mcp image, or load it into your cluster:
 #        docker build -t go-guardian-mcp:latest ./mcp-server
 #        kind load docker-image go-guardian-mcp:latest   # for kind clusters
+#
+#   4. Build the newrelic-mcp bridge image (slim target for init container):
+#        docker build --target slim -t newrelic-mcp:slim ./gateway/newrelic
+#        kind load docker-image newrelic-mcp:slim         # for kind clusters
+#
+#   5. Create the New Relic API key secret (add to existing go-guardian-secrets):
+#        kubectl create secret generic go-guardian-secrets \
+#          --from-literal=new-relic-api-key=NRAK-...
 
 resources:
 - configmap.yaml

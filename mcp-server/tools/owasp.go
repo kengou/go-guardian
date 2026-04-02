@@ -3,7 +3,9 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,19 +61,40 @@ func RegisterCheckOWASP(s *server.MCPServer, store *db.Store, projectRoot string
 			return mcp.NewToolResultText(fmt.Sprintf("error scanning %q: %v", scanPath, err)), nil
 		}
 
-		// Persist each finding to the database.
-		for _, f := range findings {
-			filePattern := filepath.Base(f.File)
-			_ = store.InsertOWASPFinding(f.Category, filePattern, f.Message, "")
+		// Persist findings to the database in a single batch.
+		items := make([]db.OWASPFindingItem, len(findings))
+		for i, f := range findings {
+			items[i] = db.OWASPFindingItem{
+				Category:    f.Category,
+				FilePattern: filepath.Base(f.File),
+				Finding:     f.Message,
+				FixPattern:  "",
+			}
+		}
+		if err := store.InsertOWASPFindingsBatch(items); err != nil {
+			log.Printf("owasp: batch insert failed: %v", err)
 		}
 
-		// Update scan history.
+		// Update scan history and append trend snapshot.
 		_ = store.UpdateScanHistory("owasp", scanPath, len(findings))
+		_ = store.InsertScanSnapshot("owasp", scanPath, len(findings), buildOWASPSnapshotDetail(findings))
 
 		// Format output.
 		text := formatFindings(scanPath, findings)
 		return mcp.NewToolResultText(text), nil
 	})
+}
+
+// buildOWASPSnapshotDetail creates a JSON detail blob from OWASP findings,
+// grouping counts by OWASP category (e.g. A02, A03).
+func buildOWASPSnapshotDetail(findings []owasp.Finding) string {
+	cats := make(map[string]int)
+	for _, f := range findings {
+		cats[string(f.Category)]++
+	}
+	detail := map[string]interface{}{"categories": cats}
+	b, _ := json.Marshal(detail)
+	return string(b)
 }
 
 // severityOrder defines the display order for severity levels.

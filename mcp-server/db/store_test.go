@@ -16,7 +16,7 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
-// TestNewStore verifies that all six tables are created by NewStore.
+// TestNewStore verifies that all tables are created by NewStore.
 func TestNewStore(t *testing.T) {
 	s := newTestStore(t)
 
@@ -27,6 +27,8 @@ func TestNewStore(t *testing.T) {
 		"scan_history",
 		"anti_patterns",
 		"dep_decisions",
+		"scan_snapshots",
+		"session_findings",
 	}
 	for _, tbl := range tables {
 		var name string
@@ -282,5 +284,164 @@ func TestDepDecision(t *testing.T) {
 	}
 	if d2.CVECount != 0 {
 		t.Errorf("CVECount after update: want 0, got %d", d2.CVECount)
+	}
+}
+
+// ── Scan Snapshot Tests ──────────────────────────────────────────────────────
+
+func TestInsertScanSnapshot(t *testing.T) {
+	s := newTestStore(t)
+
+	for i := 0; i < 3; i++ {
+		if err := s.InsertScanSnapshot("lint", "myproject", i*5, `{"categories":{"errcheck":1}}`); err != nil {
+			t.Fatalf("InsertScanSnapshot(%d): %v", i, err)
+		}
+	}
+
+	snapshots, err := s.GetScanSnapshots("lint", "myproject", 10)
+	if err != nil {
+		t.Fatalf("GetScanSnapshots: %v", err)
+	}
+	if len(snapshots) != 3 {
+		t.Fatalf("expected 3 snapshots, got %d", len(snapshots))
+	}
+	// Ordered by id DESC — most recent insert first.
+	if snapshots[0].FindingsCount != 10 {
+		t.Errorf("most recent findings_count: want 10, got %d", snapshots[0].FindingsCount)
+	}
+	if snapshots[2].FindingsCount != 0 {
+		t.Errorf("oldest findings_count: want 0, got %d", snapshots[2].FindingsCount)
+	}
+}
+
+func TestScanSnapshotRetention(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert more than retention limit.
+	for i := 0; i < 105; i++ {
+		if err := s.InsertScanSnapshot("owasp", "proj", i, "{}"); err != nil {
+			t.Fatalf("InsertScanSnapshot(%d): %v", i, err)
+		}
+	}
+
+	snapshots, err := s.GetScanSnapshots("owasp", "proj", 200)
+	if err != nil {
+		t.Fatalf("GetScanSnapshots: %v", err)
+	}
+	if len(snapshots) != 100 {
+		t.Errorf("expected 100 snapshots after pruning, got %d", len(snapshots))
+	}
+	// Most recent by ID should be first.
+	if snapshots[0].FindingsCount != 104 {
+		t.Errorf("most recent findings_count: want 104, got %d", snapshots[0].FindingsCount)
+	}
+	// Oldest retained should be 5 (0-4 pruned).
+	if snapshots[len(snapshots)-1].FindingsCount != 5 {
+		t.Errorf("oldest retained findings_count: want 5, got %d", snapshots[len(snapshots)-1].FindingsCount)
+	}
+}
+
+func TestGetAllScanSnapshots(t *testing.T) {
+	s := newTestStore(t)
+
+	_ = s.InsertScanSnapshot("lint", "proj", 5, "{}")
+	_ = s.InsertScanSnapshot("owasp", "proj", 3, "{}")
+	_ = s.InsertScanSnapshot("vuln", "proj", 1, "{}")
+
+	all, err := s.GetAllScanSnapshots("proj", 10)
+	if err != nil {
+		t.Fatalf("GetAllScanSnapshots: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("expected 3 snapshots, got %d", len(all))
+	}
+}
+
+// ── Session Finding Tests ───────────────────────────────────────────────��────
+
+func TestInsertSessionFinding(t *testing.T) {
+	s := newTestStore(t)
+
+	id, err := s.InsertSessionFinding("sess-1", "reviewer", "concurrency", "service.go", "race on shared map", "HIGH")
+	if err != nil {
+		t.Fatalf("InsertSessionFinding: %v", err)
+	}
+	if id == 0 {
+		t.Error("expected non-zero insert ID")
+	}
+
+	findings, err := s.GetSessionFindings("sess-1", "")
+	if err != nil {
+		t.Fatalf("GetSessionFindings: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	if f.Agent != "reviewer" {
+		t.Errorf("Agent: want %q, got %q", "reviewer", f.Agent)
+	}
+	if f.Severity != "HIGH" {
+		t.Errorf("Severity: want %q, got %q", "HIGH", f.Severity)
+	}
+}
+
+func TestGetSessionFindingsFilterByAgent(t *testing.T) {
+	s := newTestStore(t)
+
+	_, _ = s.InsertSessionFinding("sess-1", "reviewer", "concurrency", "a.go", "finding 1", "HIGH")
+	_, _ = s.InsertSessionFinding("sess-1", "security", "security", "b.go", "finding 2", "CRITICAL")
+	_, _ = s.InsertSessionFinding("sess-1", "reviewer", "error-handling", "c.go", "finding 3", "MEDIUM")
+
+	reviewerFindings, err := s.GetSessionFindings("sess-1", "reviewer")
+	if err != nil {
+		t.Fatalf("GetSessionFindings(reviewer): %v", err)
+	}
+	if len(reviewerFindings) != 2 {
+		t.Errorf("expected 2 reviewer findings, got %d", len(reviewerFindings))
+	}
+
+	securityFindings, err := s.GetSessionFindings("sess-1", "security")
+	if err != nil {
+		t.Fatalf("GetSessionFindings(security): %v", err)
+	}
+	if len(securityFindings) != 1 {
+		t.Errorf("expected 1 security finding, got %d", len(securityFindings))
+	}
+}
+
+func TestGetSessionFindingsByFile(t *testing.T) {
+	s := newTestStore(t)
+
+	_, _ = s.InsertSessionFinding("sess-1", "reviewer", "concurrency", "service.go", "race", "HIGH")
+	_, _ = s.InsertSessionFinding("sess-1", "security", "security", "handler.go", "injection", "CRITICAL")
+
+	findings, err := s.GetSessionFindingsByFile("sess-1", "service.go")
+	if err != nil {
+		t.Fatalf("GetSessionFindingsByFile: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Errorf("expected 1 finding for service.go, got %d", len(findings))
+	}
+}
+
+func TestCleanupOldSessions(t *testing.T) {
+	s := newTestStore(t)
+
+	_, _ = s.InsertSessionFinding("old-sess", "reviewer", "concurrency", "a.go", "old finding", "HIGH")
+	_, _ = s.InsertSessionFinding("current-sess", "security", "security", "b.go", "current finding", "HIGH")
+
+	if err := s.CleanupOldSessions("current-sess"); err != nil {
+		t.Fatalf("CleanupOldSessions: %v", err)
+	}
+
+	old, _ := s.GetSessionFindings("old-sess", "")
+	if len(old) != 0 {
+		t.Errorf("expected 0 old findings, got %d", len(old))
+	}
+
+	current, _ := s.GetSessionFindings("current-sess", "")
+	if len(current) != 1 {
+		t.Errorf("expected 1 current finding, got %d", len(current))
 	}
 }

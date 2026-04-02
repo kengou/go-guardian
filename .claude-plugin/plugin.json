@@ -1,0 +1,9 @@
+{
+  "name": "go-guardian",
+  "description": "Self-learning Go development assistant with MCP-powered memory. Reviews Go code, scans for OWASP/CVE vulnerabilities, learns from lint fixes and reviews, analyzes Renovate configs, and checks Dockerfiles, Helm charts, and K8s manifests. Trained on patterns from 37 major Go projects.",
+  "version": "0.1.0",
+  "author": {
+    "name": "kengou"
+  },
+  "repository": "https://github.com/kengou/go-guardian"
+}

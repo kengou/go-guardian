@@ -1,12 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/kengou/go-guardian/mcp-server/tools"
@@ -24,6 +31,15 @@ func main() {
 	githubToken := flag.String("github-token", os.Getenv("GITHUB_TOKEN"), "GitHub token for GHSA API (optional, increases rate limits)")
 	goModPath := flag.String("go-mod", "go.mod", "path to go.mod for --prefetch mode")
 	projectDir := flag.String("project", "", "project root for scan path validation (defaults to directory of --db)")
+
+	// CLI one-shot modes: staleness, learn, query-knowledge.
+	checkStalenessFlag := flag.Bool("check-staleness", false, "check scan staleness and print warnings, then exit")
+	learnFlag := flag.Bool("learn", false, "learn lint patterns from lint output and diff, then exit")
+	lintOutputPath := flag.String("lint-output", "", "path to file containing lint output (used with --learn)")
+	diffPath := flag.String("diff", "", "path to file containing unified diff (used with --learn)")
+	queryKnowledgeFlag := flag.Bool("query-knowledge", false, "query knowledge base for patterns relevant to a file, then exit")
+	filePath := flag.String("file-path", "", "file path for --query-knowledge mode")
+
 	flag.Parse()
 
 	if *projectDir == "" {
@@ -78,22 +94,507 @@ func main() {
 		os.Exit(0)
 	}
 
+	// ── --check-staleness: one-shot staleness check ─────────────────────────
+	if *checkStalenessFlag {
+		runCheckStaleness(store, *projectDir)
+		os.Exit(0)
+	}
+
+	// ── --learn: one-shot learn from lint output + diff ─────────────────────
+	if *learnFlag {
+		runLearn(store, *projectDir, *lintOutputPath, *diffPath)
+		os.Exit(0)
+	}
+
+	// ── --query-knowledge: one-shot knowledge query (code context via stdin) ─
+	if *queryKnowledgeFlag {
+		runQueryKnowledge(store, *filePath)
+		os.Exit(0)
+	}
+
+	// Read session ID from environment or .go-guardian/session-id file.
+	sessionID := os.Getenv("GO_GUARDIAN_SESSION_ID")
+	if sessionID == "" {
+		sidPath := filepath.Join(filepath.Dir(*dbPath), "session-id")
+		if data, err := os.ReadFile(sidPath); err == nil {
+			sessionID = strings.TrimSpace(string(data))
+		}
+	}
+	if sessionID != "" {
+		if err := store.CleanupOldSessions(sessionID); err != nil {
+			log.Printf("warning: session cleanup failed: %v", err)
+		}
+		log.Printf("session: %s", sessionID)
+	}
+
 	log.Printf("go-guardian MCP server v%s started, db: %s\n", version, *dbPath)
 
 	// Create the MCP server and register all tools.
 	s := server.NewMCPServer("go-guardian", version)
 	tools.RegisterLearnFromLint(s, store)
-	tools.RegisterQueryKnowledge(s, store)
+	tools.RegisterQueryKnowledge(s, store, sessionID)
 	tools.RegisterCheckOWASP(s, store, *projectDir)
 	tools.RegisterCheckStaleness(s, store)
 	tools.RegisterCheckDeps(s, store)
 	tools.RegisterGetPatternStats(s, store)
 	tools.RegisterSuggestFix(s, store)
+	tools.RegisterLearnFromReview(s, store)
+	tools.RegisterGetHealthTrends(s, store)
+	tools.RegisterReportFinding(s, store, sessionID)
+	tools.RegisterGetSessionFindings(s, store, sessionID)
+	tools.RegisterValidateRenovateConfig(s, store)
+	tools.RegisterAnalyzeRenovateConfig(s, store)
+	tools.RegisterSuggestRenovateRule(s, store)
+	tools.RegisterLearnRenovatePreference(s, store)
+	tools.RegisterRenovateQueryKnowledge(s, store)
+	tools.RegisterGetRenovateStats(s, store)
 
-	log.Printf("registered 7 tools: learn_from_lint, query_knowledge, check_owasp, check_staleness, check_deps, get_pattern_stats, suggest_fix (use --prefetch to pre-populate CVE data, --update-owasp to refresh OWASP rules)\n")
+	log.Printf("registered 17 tools: learn_from_lint, learn_from_review, query_knowledge, check_owasp, check_staleness, check_deps, get_pattern_stats, suggest_fix, get_health_trends, report_finding, get_session_findings, validate_renovate_config, analyze_renovate_config, suggest_renovate_rule, learn_renovate_preference, query_renovate_knowledge, get_renovate_stats\n")
 
 	// Start serving via stdio. ServeStdio handles SIGINT/SIGTERM gracefully.
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("MCP server error: %v", err)
 	}
+}
+
+// ── --check-staleness implementation ────────────────────────────────────────
+
+// staleThresholdsCLI mirrors tools.staleThresholds for the CLI mode.
+// We replicate rather than export to avoid changing the tools package interface.
+var staleThresholdsCLI = map[string]time.Duration{
+	"vuln":        3 * 24 * time.Hour,
+	"owasp":       7 * 24 * time.Hour,
+	"owasp_rules": 30 * 24 * time.Hour,
+	"full":        14 * 24 * time.Hour,
+}
+
+// runCheckStaleness checks scan staleness and prints a JSON report to stdout.
+func runCheckStaleness(store *db.Store, projectPath string) {
+	projectID := tools.ProjectID(projectPath)
+
+	history, err := store.GetScanHistory(projectID)
+	if err != nil {
+		log.Fatalf("check-staleness: failed to read scan history: %v", err)
+	}
+
+	// Build a map of scan_type -> most-recent ScanHistory record.
+	latest := make(map[string]db.ScanHistory)
+	for _, h := range history {
+		if _, seen := latest[h.ScanType]; !seen {
+			latest[h.ScanType] = h
+		}
+	}
+
+	// Collect scan types sorted for deterministic output.
+	var tracked []string
+	for scanType := range staleThresholdsCLI {
+		tracked = append(tracked, scanType)
+	}
+	sort.Strings(tracked)
+
+	type staleEntry struct {
+		ScanType   string `json:"scan_type"`
+		LastRunAgo string `json:"last_run_ago"`
+		Threshold  string `json:"threshold"`
+	}
+
+	var staleScans []staleEntry
+	for _, scanType := range tracked {
+		threshold := staleThresholdsCLI[scanType]
+		h, found := latest[scanType]
+		if !found {
+			staleScans = append(staleScans, staleEntry{
+				ScanType:   scanType,
+				LastRunAgo: "never",
+				Threshold:  formatDuration(threshold),
+			})
+			continue
+		}
+		age := time.Since(h.LastRun)
+		if age > threshold {
+			staleScans = append(staleScans, staleEntry{
+				ScanType:   scanType,
+				LastRunAgo: formatDuration(age),
+				Threshold:  formatDuration(threshold),
+			})
+		}
+	}
+
+	result := map[string]interface{}{
+		"stale_scans": staleScans,
+	}
+	enc := json.NewEncoder(os.Stdout)
+	if err := enc.Encode(result); err != nil {
+		log.Fatalf("check-staleness: failed to encode result: %v", err)
+	}
+}
+
+// formatDuration returns a human-readable duration string like "3 days" or "14 days".
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
+}
+
+// ── --learn implementation ──────────────────────────────────────────────────
+
+// cliLintLineRe matches golangci-lint output lines. Mirrors the regex in tools/learn.go.
+var cliLintLineRe = regexp.MustCompile(
+	`^([^\s:][^:]*\.go):\d+:\d+:\s+(.+?)\s+\(([^)]+)\)\s*$`,
+)
+
+// cliLintFinding holds one parsed line from golangci-lint output.
+type cliLintFinding struct {
+	file    string
+	rule    string
+	message string
+}
+
+// cliDiffHunk holds extracted before/after code from a unified diff hunk.
+type cliDiffHunk struct {
+	file     string
+	dontCode string
+	doCode   string
+}
+
+// cliLintPattern is a resolved pattern ready to be stored.
+type cliLintPattern struct {
+	Rule     string
+	FileGlob string
+	DontCode string
+	DoCode   string
+}
+
+// runLearn reads lint output and diff from files and learns patterns.
+func runLearn(store *db.Store, projectPath, lintOutputPath, diffPath string) {
+	if lintOutputPath == "" {
+		log.Fatalf("learn: --lint-output is required")
+	}
+
+	lintData, err := os.ReadFile(lintOutputPath)
+	if err != nil {
+		log.Fatalf("learn: failed to read lint output file: %v", err)
+	}
+	lintOutput := string(lintData)
+
+	var diff string
+	if diffPath != "" {
+		diffData, err := os.ReadFile(diffPath)
+		if err != nil {
+			log.Fatalf("learn: failed to read diff file: %v", err)
+		}
+		diff = string(diffData)
+	}
+
+	// Parse lint output and diff, then store patterns.
+	findings := cliParseLintOutput(lintOutput)
+	hunks := cliParseDiff(diff)
+	patterns := cliMatchFindingsToHunks(findings, hunks)
+
+	learned := 0
+	for _, p := range patterns {
+		if err := store.InsertLintPattern(p.Rule, p.FileGlob, p.DontCode, p.DoCode, "learned"); err != nil {
+			log.Fatalf("learn: store error: %v", err)
+		}
+		learned++
+	}
+
+	// Record scan snapshot for trend tracking.
+	projectID := tools.ProjectID(projectPath)
+	_ = store.InsertScanSnapshot("lint", projectID, len(findings), "{}")
+
+	fmt.Printf("Learned %d patterns from lint output.\n", learned)
+}
+
+// cliParseLintOutput parses raw golangci-lint output. Mirrors tools/learn.go parseLintOutput.
+func cliParseLintOutput(output string) []cliLintFinding {
+	var findings []cliLintFinding
+	seen := make(map[string]bool)
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		m := cliLintLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		filePath := m[1]
+		body := strings.TrimSpace(m[2])
+		linter := strings.TrimSpace(m[3])
+
+		rule := linter
+		if idx := strings.Index(body, ":"); idx > 0 {
+			candidate := strings.TrimSpace(body[:idx])
+			if len(candidate) <= 60 && !strings.ContainsAny(candidate, " \t()") {
+				rule = candidate
+			}
+		}
+
+		base := filepath.Base(filePath)
+		key := rule + "|" + base
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		findings = append(findings, cliLintFinding{
+			file:    base,
+			rule:    rule,
+			message: body,
+		})
+	}
+	return findings
+}
+
+// cliParseDiff parses a unified diff. Mirrors tools/learn.go parseDiff.
+func cliParseDiff(diff string) []cliDiffHunk {
+	const maxSnippet = 500
+
+	var hunks []cliDiffHunk
+	var current *cliDiffHunk
+	var dontBuf, doBuf strings.Builder
+
+	flushCurrent := func() {
+		if current == nil {
+			return
+		}
+		current.dontCode = cliTrimSnippet(dontBuf.String(), maxSnippet)
+		current.doCode = cliTrimSnippet(doBuf.String(), maxSnippet)
+		hunks = append(hunks, *current)
+		current = nil
+		dontBuf.Reset()
+		doBuf.Reset()
+	}
+
+	for _, line := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff --git") || strings.HasPrefix(line, "diff -"):
+			flushCurrent()
+
+		case strings.HasPrefix(line, "--- "):
+			flushCurrent()
+			rest := strings.TrimPrefix(line, "--- ")
+			rest = strings.TrimPrefix(rest, "a/")
+			rest = strings.TrimPrefix(rest, "b/")
+			if rest == "/dev/null" {
+				rest = ""
+			}
+			base := filepath.Base(rest)
+			if !strings.HasSuffix(base, ".go") && base != "" {
+				current = nil
+				continue
+			}
+			current = &cliDiffHunk{file: base}
+			dontBuf.Reset()
+			doBuf.Reset()
+
+		case strings.HasPrefix(line, "+++ "):
+			// Skip -- file name already captured from "---" line.
+
+		case current == nil:
+			// No active hunk yet; skip context/header lines.
+
+		case strings.HasPrefix(line, "-"):
+			code := line[1:]
+			if cliIsUsefulCodeLine(code) {
+				if dontBuf.Len() > 0 {
+					dontBuf.WriteByte('\n')
+				}
+				dontBuf.WriteString(strings.TrimRight(code, " \t"))
+			}
+
+		case strings.HasPrefix(line, "+"):
+			code := line[1:]
+			if cliIsUsefulCodeLine(code) {
+				if doBuf.Len() > 0 {
+					doBuf.WriteByte('\n')
+				}
+				doBuf.WriteString(strings.TrimRight(code, " \t"))
+			}
+		}
+	}
+	flushCurrent()
+	return hunks
+}
+
+// cliIsUsefulCodeLine returns true when the line is not blank or a standalone comment.
+func cliIsUsefulCodeLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "//") {
+		return false
+	}
+	return true
+}
+
+// cliTrimSnippet truncates s to maxLen bytes, appending "..." if truncated.
+func cliTrimSnippet(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// cliMatchFindingsToHunks pairs each lint finding with the diff hunk for the same file.
+func cliMatchFindingsToHunks(findings []cliLintFinding, hunks []cliDiffHunk) []cliLintPattern {
+	hunkByFile := make(map[string]cliDiffHunk, len(hunks))
+	for _, h := range hunks {
+		if _, exists := hunkByFile[h.file]; !exists {
+			hunkByFile[h.file] = h
+		}
+	}
+
+	var patterns []cliLintPattern
+	for _, f := range findings {
+		hunk, matched := hunkByFile[f.file]
+		glob := cliFileGlobFor(f.file)
+
+		if matched {
+			patterns = append(patterns, cliLintPattern{
+				Rule:     f.rule,
+				FileGlob: glob,
+				DontCode: hunk.dontCode,
+				DoCode:   hunk.doCode,
+			})
+		} else {
+			patterns = append(patterns, cliLintPattern{
+				Rule:     f.rule,
+				FileGlob: glob,
+				DontCode: "",
+				DoCode:   "",
+			})
+		}
+	}
+
+	// If there were hunks but no lint findings, store diff hunks with a synthetic rule.
+	if len(findings) == 0 {
+		for _, h := range hunks {
+			if h.dontCode == "" && h.doCode == "" {
+				continue
+			}
+			patterns = append(patterns, cliLintPattern{
+				Rule:     "diff-only",
+				FileGlob: cliFileGlobFor(h.file),
+				DontCode: h.dontCode,
+				DoCode:   h.doCode,
+			})
+		}
+	}
+
+	return patterns
+}
+
+// cliFileGlobFor derives a file glob from a Go source basename. Mirrors tools/learn.go fileGlobFor.
+func cliFileGlobFor(base string) string {
+	if base == "" {
+		return "*.go"
+	}
+	stem := strings.TrimSuffix(base, ".go")
+
+	bareWordGlobs := map[string]string{
+		"handler":    "*_handler.go",
+		"handlers":   "*_handler.go",
+		"server":     "*_server.go",
+		"client":     "*_client.go",
+		"repo":       "*_repo.go",
+		"repository": "*_repository.go",
+		"service":    "*_service.go",
+		"model":      "*_model.go",
+		"controller": "*_controller.go",
+	}
+	if glob, ok := bareWordGlobs[stem]; ok {
+		return glob
+	}
+
+	domainSuffixes := []string{
+		"_handler", "_handlers",
+		"_test",
+		"_server", "_client",
+		"_middleware",
+		"_controller",
+		"_repository", "_repo",
+		"_service",
+		"_model",
+		"_mock",
+		"_gen", "_generated",
+	}
+	for _, suffix := range domainSuffixes {
+		if strings.HasSuffix(stem, suffix) {
+			return "*" + suffix + ".go"
+		}
+	}
+	return "*.go"
+}
+
+// ── --query-knowledge implementation ────────────────────────────────────────
+
+// runQueryKnowledge reads code context from stdin and queries the knowledge base.
+func runQueryKnowledge(store *db.Store, filePath string) {
+	// Derive file glob from the file path.
+	glob := "*.go"
+	if filePath != "" {
+		base := filepath.Base(filePath)
+		switch {
+		case strings.HasSuffix(base, "_test.go"):
+			glob = "*_test.go"
+		case strings.HasSuffix(base, "_handler.go"):
+			glob = "*_handler.go"
+		case strings.HasSuffix(base, "_middleware.go"):
+			glob = "*_middleware.go"
+		}
+	}
+
+	// Read code context from stdin (for security -- avoid CLI arg).
+	var codeContext string
+	reader := bufio.NewReader(os.Stdin)
+	data, err := io.ReadAll(reader)
+	if err == nil {
+		codeContext = strings.TrimSpace(string(data))
+	}
+	// Truncate to 1000 chars.
+	if len(codeContext) > 1000 {
+		codeContext = codeContext[:1000]
+	}
+
+	// Query lint patterns (limit 10, sorted by frequency).
+	lintPatterns, err := store.QueryPatterns(glob, codeContext, 10)
+	if err != nil {
+		log.Fatalf("query-knowledge: querying lint patterns: %v", err)
+	}
+
+	if len(lintPatterns) == 0 {
+		fmt.Println("No learned patterns for this context yet.")
+		return
+	}
+
+	// Format patterns as prevention context.
+	fmt.Println("LEARNED PATTERNS FOR THIS CONTEXT:")
+	cap5 := lintPatterns
+	if len(cap5) > 5 {
+		cap5 = cap5[:5]
+	}
+	for _, p := range cap5 {
+		dontLine := cliFirstLine(p.DontCode)
+		doLine := cliFirstLine(p.DoCode)
+		fmt.Printf("- [lint:%s x%d] %s\n", p.Rule, p.Frequency, dontLine)
+		fmt.Printf("  -> DO: %s\n", doLine)
+	}
+}
+
+// cliFirstLine returns the first non-empty line of s, trimmed of whitespace.
+func cliFirstLine(s string) string {
+	for _, line := range strings.SplitN(s, "\n", -1) {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return strings.TrimSpace(s)
 }

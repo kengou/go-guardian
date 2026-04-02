@@ -111,6 +111,10 @@ func learnFromLintHandler(store *db.Store) server.ToolHandlerFunc {
 			summaries = append(summaries, patternSummary{Rule: p.rule, FileGlob: p.fileGlob})
 		}
 
+		// Append trend snapshot for lint findings.
+		project := req.GetString("project", "")
+		_ = store.InsertScanSnapshot("lint", project, len(findings), buildLintSnapshotDetail(findings))
+
 		result := map[string]interface{}{
 			"learned":  learned,
 			"updated":  updated,
@@ -326,6 +330,18 @@ func matchFindingsToHunks(findings []lintFinding, hunks []diffHunk) []lintPatter
 	}
 
 	return patterns
+}
+
+// buildLintSnapshotDetail creates a JSON detail blob from lint findings,
+// grouping counts by rule name.
+func buildLintSnapshotDetail(findings []lintFinding) string {
+	cats := make(map[string]int)
+	for _, f := range findings {
+		cats[f.rule]++
+	}
+	detail := map[string]interface{}{"categories": cats}
+	b, _ := json.Marshal(detail)
+	return string(b)
 }
 
 // fileGlobFor derives a file glob from a Go source basename.

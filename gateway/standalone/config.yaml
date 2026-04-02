@@ -1,3 +1,5 @@
+# Run from this directory: cd gateway/standalone && agentgateway --config config.yaml
+# Paths below are relative to gateway/standalone/
 # yaml-language-server: $schema=https://agentgateway.dev/schema/config
 binds:
 - port: 3000
@@ -30,10 +32,18 @@ binds:
               schema:
                 file: ../openapi/go-vuln.json
               host: vuln.go.dev
+          - name: newrelic
+            stdio:
+              cmd: node
+              args: ["../newrelic/bridge.mjs"]
+              env:
+                NEW_RELIC_API_KEY: "${NEW_RELIC_API_KEY}"
+                NEW_RELIC_REGION: "${NEW_RELIC_REGION}"
         policies:
           cors:
             allowOrigins:
-            - "http://localhost:*"
+            - "http://localhost:3000"
+            - "http://localhost:3001"
             allowHeaders:
             - content-type
             - mcp-protocol-version

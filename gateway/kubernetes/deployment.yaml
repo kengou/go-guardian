@@ -14,10 +14,43 @@ spec:
       labels:
         app: go-guardian
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      # Init container copies the Node.js runtime + mcp-remote bridge to a
+      # shared emptyDir so agentgateway can spawn it via stdio.
+      # Uses node:24-slim (not distroless) because it needs a shell for cp.
+      initContainers:
+      - name: newrelic-mcp-init
+        # Build this image with the "slim" target (has shell for cp):
+        #   docker build --target slim -t newrelic-mcp:slim gateway/newrelic/
+        image: newrelic-mcp:slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /shared/newrelic-mcp/bin &&
+          cp /usr/local/bin/node /shared/newrelic-mcp/bin/node &&
+          cp -r /app /shared/newrelic-mcp/app
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        volumeMounts:
+        - name: newrelic-mcp-bin
+          mountPath: /shared/newrelic-mcp
+
       containers:
       - name: agentgateway
-        image: ghcr.io/agentgateway/agentgateway:latest
+        image: ghcr.io/agentgateway/agentgateway:v1.0.1
         args: ["--config", "/etc/go-guardian/config.yaml"]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
         ports:
         - name: mcp
           containerPort: 3000
@@ -53,6 +86,18 @@ spec:
               name: go-guardian-secrets
               key: github-token
               optional: true
+        - name: NEW_RELIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: go-guardian-secrets
+              key: new-relic-api-key
+              optional: true
+        - name: NEW_RELIC_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: go-guardian-config
+              key: new-relic-region
+              optional: true
         volumeMounts:
         - name: config
           mountPath: /etc/go-guardian
@@ -60,6 +105,11 @@ spec:
         - name: openapi
           mountPath: /etc/go-guardian/openapi
           readOnly: true
+        - name: newrelic-mcp-bin
+          mountPath: /shared/newrelic-mcp
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
 
       - name: go-guardian-mcp
         # Build this image from the mcp-server/ directory:
@@ -67,6 +117,12 @@ spec:
         #   REGISTRY=ghcr.io/myorg make -C mcp-server docker-push-multi (multi-platform, push)
         image: go-guardian-mcp:latest
         args: ["--db", "/data/guardian.db"]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
         env:
         - name: NVD_API_KEY
           valueFrom:
@@ -112,3 +168,11 @@ spec:
           # Example: kubectl apply -f pvc.yaml
           # Minimum recommended: 1Gi, accessMode ReadWriteOnce.
           claimName: go-guardian-data
+      - name: newrelic-mcp-bin
+        # Init container copies Node.js + mcp-remote bridge here.
+        # agentgateway spawns the bridge from this volume via stdio.
+        emptyDir:
+          sizeLimit: 200Mi
+      - name: tmp
+        emptyDir:
+          sizeLimit: 50Mi

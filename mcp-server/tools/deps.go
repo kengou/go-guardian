@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -73,6 +74,13 @@ func RegisterCheckDeps(s *server.MCPServer, store *db.Store) {
 				_ = uErr
 			}
 		}
+
+		// Append trend snapshot for vulnerability findings.
+		totalCVEs := 0
+		for _, r := range results {
+			totalCVEs += len(r.cves)
+		}
+		_ = store.InsertScanSnapshot("vuln", "", totalCVEs, buildVulnSnapshotDetail(results))
 
 		return mcp.NewToolResultText(formatResults(results)), nil
 	})
@@ -257,6 +265,20 @@ func recommendationFor(r moduleResult) string {
 	default:
 		return "Use the gateway vuln API tools to fetch live vulnerability data for this module."
 	}
+}
+
+// buildVulnSnapshotDetail creates a JSON detail blob from dep analysis results,
+// grouping CVE counts by severity.
+func buildVulnSnapshotDetail(results []moduleResult) string {
+	cats := make(map[string]int)
+	for _, r := range results {
+		for _, c := range r.cves {
+			cats[c.Severity]++
+		}
+	}
+	detail := map[string]interface{}{"categories": cats}
+	b, _ := json.Marshal(detail)
+	return string(b)
 }
 
 // ParseGoMod reads a go.mod file at path and returns all require module paths

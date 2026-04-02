@@ -17,6 +17,9 @@ const (
 	highConfidenceThreshold = 0.6
 	// mediumConfidenceThreshold is the minimum similarity score for "medium" confidence.
 	mediumConfidenceThreshold = 0.3
+	// earlyTerminationThreshold is the score above which a match counts as
+	// high-confidence for early termination purposes.
+	earlyTerminationThreshold = 0.8
 )
 
 // suggestMatch holds a matched pattern and its similarity score.
@@ -75,8 +78,12 @@ func RegisterSuggestFix(s *server.MCPServer, store *db.Store) {
 // similar to snippet. issueType filters to "lint", "owasp", "pattern", or all.
 func findMatches(store *db.Store, snippet, issueType string) ([]suggestMatch, error) {
 	var matches []suggestMatch
+	highCount := 0
 
 	issueType = strings.ToLower(strings.TrimSpace(issueType))
+
+	// Pre-lowercase the snippet once for all similarity comparisons.
+	snippetLower := strings.ToLower(snippet)
 
 	// Search lint_patterns (unless caller restricted to "owasp" or "pattern").
 	if issueType == "" || issueType == "lint" {
@@ -88,7 +95,7 @@ func findMatches(store *db.Store, snippet, issueType string) ([]suggestMatch, er
 			if p.DontCode == "" {
 				continue
 			}
-			sim := snippetSimilarity(snippet, p.DontCode)
+			sim := snippetSimilarityPreLowered(snippetLower, p.DontCode)
 			if sim > 0 {
 				matches = append(matches, suggestMatch{
 					rule:       fmt.Sprintf("lint:%s", p.Rule),
@@ -97,12 +104,18 @@ func findMatches(store *db.Store, snippet, issueType string) ([]suggestMatch, er
 					frequency:  p.Frequency,
 					similarity: sim,
 				})
+				if sim > earlyTerminationThreshold {
+					highCount++
+					if highCount >= maxSuggestMatches {
+						break
+					}
+				}
 			}
 		}
 	}
 
 	// Search anti_patterns (unless caller restricted to "lint" or "owasp").
-	if issueType == "" || issueType == "pattern" {
+	if (issueType == "" || issueType == "pattern") && highCount < maxSuggestMatches {
 		antiPatterns, err := store.QueryAntiPatterns("")
 		if err != nil {
 			return nil, fmt.Errorf("query anti patterns: %w", err)
@@ -111,7 +124,7 @@ func findMatches(store *db.Store, snippet, issueType string) ([]suggestMatch, er
 			if ap.DontCode == "" {
 				continue
 			}
-			sim := snippetSimilarity(snippet, ap.DontCode)
+			sim := snippetSimilarityPreLowered(snippetLower, ap.DontCode)
 			if sim > 0 {
 				matches = append(matches, suggestMatch{
 					rule:       fmt.Sprintf("pattern:%s", ap.PatternID),
@@ -120,6 +133,12 @@ func findMatches(store *db.Store, snippet, issueType string) ([]suggestMatch, er
 					frequency:  0, // anti-patterns don't have a frequency field
 					similarity: sim,
 				})
+				if sim > earlyTerminationThreshold {
+					highCount++
+					if highCount >= maxSuggestMatches {
+						break
+					}
+				}
 			}
 		}
 	}
@@ -206,8 +225,15 @@ func snippetSimilarity(snippet, dontCode string) float64 {
 	if snippet == "" || dontCode == "" {
 		return 0.0
 	}
+	return snippetSimilarityPreLowered(strings.ToLower(snippet), dontCode)
+}
 
-	snippetLower := strings.ToLower(snippet)
+// snippetSimilarityPreLowered is like snippetSimilarity but accepts a
+// pre-lowercased snippet to avoid redundant ToLower calls in hot loops.
+func snippetSimilarityPreLowered(snippetLower, dontCode string) float64 {
+	if snippetLower == "" || dontCode == "" {
+		return 0.0
+	}
 
 	var total, matched int
 	for _, line := range strings.Split(dontCode, "\n") {

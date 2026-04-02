@@ -1,35 +1,18 @@
 ---
 name: go-test
 description: Run Go tests with race detector and coverage reporting.
+argument-hint: "[package-or-file] [--race] [--cover]"
+paths: "*.go,*_test.go"
 ---
 
 # /go-test — Go Test
 
-## Process
+Delegate to `go-guardian:tester` with the user's request.
 
-1. Check for race conditions:
-   ```
-   go test -race -count=1 ./... 2>&1
-   ```
+The agent owns the full workflow including MCP tool calls, learning loop, and reporting.
 
-2. Run with coverage:
-   ```
-   go test -coverprofile=/tmp/go-guardian-cover.out ./... 2>&1
-   go tool cover -func=/tmp/go-guardian-cover.out | tail -1
-   ```
-
-3. Analyse failures:
-   - For each failing test, call `query_knowledge` with the test file path.
-   - Check returned patterns for known testing anti-patterns (e.g. TEST-1 through TEST-6).
-   - Suggest fixes referencing the relevant pattern ID.
-
-4. Coverage gate:
-   - Warn if total coverage < 60%.
-   - Warn specifically if security-related packages have < 80% coverage.
-
-## Testing Best Practices (from learned patterns)
-
-- Use `require.NoError` / `require.Equal` (testify) — not `if err != nil { t.Fatal }` inline
-- Table-driven tests with descriptive `name` fields
-- No `time.Sleep` — use channels, `require.Eventually`, or mock clocks
-- Test files in same package for white-box, `_test` suffix package for black-box
+**Context to provide the agent:**
+- Target files or packages to test
+- Whether to include race detection and coverage reporting
+- Any specific test files or functions to focus on
+- Coverage thresholds (default: 60% overall, 80% for security-related packages)
