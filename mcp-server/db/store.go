@@ -195,6 +195,43 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// HealthcheckTables returns all user table names in the database.
+func (s *Store) HealthcheckTables() ([]string, error) {
+	rows, err := s.db.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	return tables, rows.Err()
+}
+
+// HealthcheckCounts returns row counts for all user tables.
+func (s *Store) HealthcheckCounts() (map[string]int64, error) {
+	tables, err := s.HealthcheckTables()
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(tables))
+	for _, t := range tables {
+		var count int64
+		// Table name comes from sqlite_master, not user input — safe to interpolate.
+		if err := s.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %q", t)).Scan(&count); err != nil {
+			return nil, fmt.Errorf("count %s: %w", t, err)
+		}
+		counts[t] = count
+	}
+	return counts, nil
+}
+
 // runSchema executes the inlined DDL statements to create all tables and indexes.
 func runSchema(db *sql.DB) error {
 	_, err := db.Exec(schemaStatements)
