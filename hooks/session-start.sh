@@ -63,12 +63,12 @@ binds:
 - port: 3000
   listeners:
   - routes:
-    - cors:
-        allowOrigins: ["http://localhost:3000"]
-        allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
-        exposeHeaders: [mcp-session-id, mcp-protocol-version]
-        maxAge: 100s
-      policies:
+    - policies:
+        cors:
+          allowOrigins: ["http://localhost:3000"]
+          allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
+          exposeHeaders: [mcp-session-id, mcp-protocol-version]
+          maxAge: 100s
         csrf:
           additionalOrigins: ["http://localhost:3000"]
       backends:
@@ -114,12 +114,12 @@ binds:
 - port: 3000
   listeners:
   - routes:
-    - cors:
-        allowOrigins: ["http://localhost:3000"]
-        allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
-        exposeHeaders: [mcp-session-id, mcp-protocol-version]
-        maxAge: 100s
-      policies:
+    - policies:
+        cors:
+          allowOrigins: ["http://localhost:3000"]
+          allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
+          exposeHeaders: [mcp-session-id, mcp-protocol-version]
+          maxAge: 100s
         csrf:
           additionalOrigins: ["http://localhost:3000"]
       backends:
