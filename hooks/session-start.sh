@@ -84,10 +84,9 @@ binds:
                 file: ${OPENAPI_DIR}/github-advisories.json
               host: api.github.com
             policies:
-              backendAuth:
-                key: "\${GITHUB_TOKEN}"
               requestHeaderModifier:
                 set:
+                  Authorization: "Bearer \${GITHUB_TOKEN}"
                   X-GitHub-Api-Version: "2022-11-28"
           - name: nvd
             openapi:
@@ -95,8 +94,9 @@ binds:
                 file: ${OPENAPI_DIR}/nvd.json
               host: services.nvd.nist.gov
             policies:
-              backendAuth:
-                key: "\${NVD_API_KEY}"
+              requestHeaderModifier:
+                set:
+                  apiKey: "\${NVD_API_KEY}"
           - name: go-vuln
             openapi:
               schema:
@@ -131,10 +131,9 @@ binds:
                 file: /openapi/github-advisories.json
               host: api.github.com
             policies:
-              backendAuth:
-                key: "\${GITHUB_TOKEN}"
               requestHeaderModifier:
                 set:
+                  Authorization: "Bearer \${GITHUB_TOKEN}"
                   X-GitHub-Api-Version: "2022-11-28"
           - name: nvd
             openapi:
@@ -142,8 +141,9 @@ binds:
                 file: /openapi/nvd.json
               host: services.nvd.nist.gov
             policies:
-              backendAuth:
-                key: "\${NVD_API_KEY}"
+              requestHeaderModifier:
+                set:
+                  apiKey: "\${NVD_API_KEY}"
           - name: go-vuln
             openapi:
               schema:
