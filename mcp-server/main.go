@@ -747,7 +747,7 @@ func runHealthcheck(dbPath string) int {
 	return 0
 }
 
-// printHealthcheck renders the results to stdout as JSON and a human-readable summary.
+// printHealthcheck renders the results to stdout as a human-readable summary.
 func printHealthcheck(results []healthcheckResult) {
 	passes, fails, warns := 0, 0, 0
 	for _, r := range results {

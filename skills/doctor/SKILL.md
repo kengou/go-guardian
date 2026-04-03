@@ -32,8 +32,12 @@ All checks should show `[OK]`. Common issues:
 
 | Check | Fix |
 |-------|-----|
+| `[FAIL] db_directory` | Check filesystem permissions on the parent directory |
 | `[FAIL] db_open` | Delete the DB file and restart the session — it will be recreated |
+| `[FAIL] db_file` | Verify DB file exists and is readable |
+| `[FAIL] schema` | DB may be corrupt — delete and recreate |
 | `[FAIL] table_*` | DB schema is outdated — rebuild the binary (`go build -ldflags="-s -w" -o $MCP_BIN .`) |
+| `[FAIL] seed_data` | DB may be corrupt — delete and recreate |
 | `[FAIL] seed_*` | Delete the DB file and restart — seeds are applied on creation |
 | `[WARN] db_permissions` | Run `chmod 600 $DB_PATH` |
 | `[WARN] session` | Normal outside Claude Code — inside a session this indicates session-start.sh didn't run |
