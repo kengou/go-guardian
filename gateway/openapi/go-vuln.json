@@ -118,7 +118,9 @@
             "description": "Optional semver version to restrict results (e.g. 'v1.2.3'). If omitted, all vulnerabilities for the module are returned."
           }
         },
-        "required": ["module"]
+        "required": [
+          "module"
+        ]
       },
       "QueryResponse": {
         "type": "object",
@@ -131,7 +133,9 @@
             }
           }
         },
-        "required": ["vulns"]
+        "required": [
+          "vulns"
+        ]
       },
       "OSVEntry": {
         "type": "object",
@@ -174,9 +178,10 @@
             "description": "ISO 8601 timestamp when the entry was last modified."
           },
           "withdrawn": {
-            "type": ["string", "null"],
+            "type": "string",
             "format": "date-time",
-            "description": "Set if the advisory has been withdrawn."
+            "description": "Set if the advisory has been withdrawn.",
+            "nullable": true
           },
           "affected": {
             "type": "array",
@@ -192,14 +197,28 @@
               "properties": {
                 "type": {
                   "type": "string",
-                  "enum": ["ADVISORY", "ARTICLE", "DETECTION", "DISCUSSION", "FIX", "GIT", "INTRODUCED", "PACKAGE", "REPORT", "WEB"]
+                  "enum": [
+                    "ADVISORY",
+                    "ARTICLE",
+                    "DETECTION",
+                    "DISCUSSION",
+                    "FIX",
+                    "GIT",
+                    "INTRODUCED",
+                    "PACKAGE",
+                    "REPORT",
+                    "WEB"
+                  ]
                 },
                 "url": {
                   "type": "string",
                   "format": "uri"
                 }
               },
-              "required": ["type", "url"]
+              "required": [
+                "type",
+                "url"
+              ]
             }
           },
           "credits": {
@@ -207,10 +226,14 @@
             "items": {
               "type": "object",
               "properties": {
-                "name": { "type": "string" },
+                "name": {
+                  "type": "string"
+                },
                 "contact": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -226,13 +249,21 @@
               },
               "review_status": {
                 "type": "string",
-                "enum": ["REVIEWED", "UNREVIEWED"],
+                "enum": [
+                  "REVIEWED",
+                  "UNREVIEWED"
+                ],
                 "description": "Whether the entry has been reviewed by the Go security team."
               }
             }
           }
         },
-        "required": ["id", "published", "modified", "affected"]
+        "required": [
+          "id",
+          "published",
+          "modified",
+          "affected"
+        ]
       },
       "Affected": {
         "type": "object",
@@ -254,7 +285,10 @@
                 "description": "Package URL (purl) for the affected package."
               }
             },
-            "required": ["name", "ecosystem"]
+            "required": [
+              "name",
+              "ecosystem"
+            ]
           },
           "ranges": {
             "type": "array",
@@ -286,21 +320,29 @@
                     },
                     "goos": {
                       "type": "array",
-                      "items": { "type": "string" },
+                      "items": {
+                        "type": "string"
+                      },
                       "description": "GOOS values for which this import is affected."
                     },
                     "goarch": {
                       "type": "array",
-                      "items": { "type": "string" },
+                      "items": {
+                        "type": "string"
+                      },
                       "description": "GOARCH values for which this import is affected."
                     },
                     "symbols": {
                       "type": "array",
                       "description": "Specific exported symbols (functions, methods, types) that are affected.",
-                      "items": { "type": "string" }
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
-                  "required": ["path"]
+                  "required": [
+                    "path"
+                  ]
                 }
               }
             }
@@ -309,14 +351,20 @@
             "type": "object"
           }
         },
-        "required": ["package"]
+        "required": [
+          "package"
+        ]
       },
       "Range": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["SEMVER", "ECOSYSTEM", "GIT"],
+            "enum": [
+              "SEMVER",
+              "ECOSYSTEM",
+              "GIT"
+            ],
             "description": "The versioning scheme. Go vulnerabilities use SEMVER."
           },
           "events": {
@@ -342,7 +390,10 @@
             }
           }
         },
-        "required": ["type", "events"]
+        "required": [
+          "type",
+          "events"
+        ]
       }
     }
   }
