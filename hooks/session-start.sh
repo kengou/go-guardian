@@ -63,7 +63,15 @@ binds:
 - port: 3000
   listeners:
   - routes:
-    - backends:
+    - cors:
+        allowOrigins: ["http://localhost:3000"]
+        allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
+        exposeHeaders: [mcp-session-id, mcp-protocol-version]
+        maxAge: 100s
+      policies:
+        csrf:
+          additionalOrigins: ["http://localhost:3000"]
+      backends:
       - mcp:
           targets:
           - name: go-guardian
@@ -90,12 +98,6 @@ binds:
               schema:
                 file: ${OPENAPI_DIR}/go-vuln.json
               host: vuln.go.dev
-        policies:
-          cors:
-            allowOrigins: ["http://localhost:3000"]
-            allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
-            exposeHeaders: [mcp-session-id, mcp-protocol-version]
-            maxAge: 5m
 GWEOF
 
   # ── Docker config (OpenAPI backends only — go-guardian stays on stdio via .mcp.json) ──
@@ -108,7 +110,15 @@ binds:
 - port: 3000
   listeners:
   - routes:
-    - backends:
+    - cors:
+        allowOrigins: ["http://localhost:3000"]
+        allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
+        exposeHeaders: [mcp-session-id, mcp-protocol-version]
+        maxAge: 100s
+      policies:
+        csrf:
+          additionalOrigins: ["http://localhost:3000"]
+      backends:
       - mcp:
           targets:
           - name: github-advisories
@@ -131,12 +141,6 @@ binds:
               schema:
                 file: /openapi/go-vuln.json
               host: vuln.go.dev
-        policies:
-          cors:
-            allowOrigins: ["http://localhost:3000"]
-            allowHeaders: [content-type, mcp-protocol-version, mcp-session-id]
-            exposeHeaders: [mcp-session-id, mcp-protocol-version]
-            maxAge: 5m
 GWEOF
 
   # ── Auto-start gateway if opted in ────────────────────────────────────────
