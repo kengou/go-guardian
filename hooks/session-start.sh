@@ -189,7 +189,7 @@ GWEOF
       if [[ -f "${GUARDIAN_DIR}/gateway.pid" ]]; then
         kill "$(cat "${GUARDIAN_DIR}/gateway.pid")" 2>/dev/null || true
       fi
-      agentgateway --config "${GATEWAY_CONFIG}" &
+      agentgateway -f "${GATEWAY_CONFIG}" &
       echo $! > "${GUARDIAN_DIR}/gateway.pid"
       GW_STARTED=true
       echo "  go-guardian: agentgateway (native) started on :3000 (PID $!)"
