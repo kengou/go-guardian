@@ -1,10 +1,10 @@
 ---
-name: doctor
+name: go-doctor
 description: Diagnose go-guardian installation health — binary, database, schema, seeds, session.
 argument-hint: ""
 ---
 
-# /doctor — Go Guardian Health Check
+# /go-doctor — Go Guardian Health Check
 
 Run the go-guardian MCP server's built-in healthcheck to verify the installation is working correctly.
 
