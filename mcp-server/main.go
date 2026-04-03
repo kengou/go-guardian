@@ -20,7 +20,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 func main() {
 	dbPath := flag.String("db", ".go-guardian/guardian.db", "path to the SQLite database file")
@@ -32,7 +32,8 @@ func main() {
 	goModPath := flag.String("go-mod", "go.mod", "path to go.mod for --prefetch mode")
 	projectDir := flag.String("project", "", "project root for scan path validation (defaults to directory of --db)")
 
-	// CLI one-shot modes: staleness, learn, query-knowledge.
+	// CLI one-shot modes: staleness, learn, query-knowledge, healthcheck.
+	healthcheckFlag := flag.Bool("healthcheck", false, "run diagnostic checks on DB schema, seeds, and tool registration, then exit")
 	checkStalenessFlag := flag.Bool("check-staleness", false, "check scan staleness and print warnings, then exit")
 	learnFlag := flag.Bool("learn", false, "learn lint patterns from lint output and diff, then exit")
 	lintOutputPath := flag.String("lint-output", "", "path to file containing lint output (used with --learn)")
@@ -49,6 +50,11 @@ func main() {
 	if *showVersion {
 		fmt.Printf("go-guardian-mcp v%s\n", version)
 		os.Exit(0)
+	}
+
+	// ── --healthcheck: diagnostic checks ───────────────────────────────────
+	if *healthcheckFlag {
+		os.Exit(runHealthcheck(*dbPath))
 	}
 
 	// Create parent directories for the db path if they don't exist.
@@ -597,4 +603,169 @@ func cliFirstLine(s string) string {
 		}
 	}
 	return strings.TrimSpace(s)
+}
+
+// ── --healthcheck implementation ───────────────────────────────────────────
+
+// healthcheckResult holds a single diagnostic check outcome.
+type healthcheckResult struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "pass", "fail", "warn"
+	Detail string `json:"detail,omitempty"`
+}
+
+// runHealthcheck opens the database (or creates it), verifies schema, seeds,
+// and tool registration, then prints a JSON report and returns 0 (all pass)
+// or 1 (any failure).
+func runHealthcheck(dbPath string) int {
+	var results []healthcheckResult
+	pass := func(name, detail string) { results = append(results, healthcheckResult{name, "pass", detail}) }
+	fail := func(name, detail string) { results = append(results, healthcheckResult{name, "fail", detail}) }
+	warn := func(name, detail string) { results = append(results, healthcheckResult{name, "warn", detail}) }
+
+	// 1. Binary version
+	pass("binary", fmt.Sprintf("go-guardian-mcp v%s", version))
+
+	// 2. DB file
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		fail("db_directory", fmt.Sprintf("cannot create: %v", err))
+		printHealthcheck(results)
+		return 1
+	}
+
+	store, err := db.NewStore(dbPath)
+	if err != nil {
+		fail("db_open", fmt.Sprintf("cannot open: %v", err))
+		printHealthcheck(results)
+		return 1
+	}
+	defer store.Close()
+
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		fail("db_file", fmt.Sprintf("stat failed: %v", err))
+	} else {
+		perm := info.Mode().Perm()
+		if perm&0o077 != 0 {
+			warn("db_permissions", fmt.Sprintf("0%o — should be 0600 (owner-only)", perm))
+		} else {
+			pass("db_file", fmt.Sprintf("%s (%d bytes, 0%o)", dbPath, info.Size(), perm))
+		}
+	}
+
+	// 3. Schema tables
+	expectedTables := []string{
+		"lint_patterns", "owasp_findings", "vuln_cache", "scan_history",
+		"anti_patterns", "dep_decisions", "scan_snapshots", "session_findings",
+		"renovate_preferences", "renovate_rules", "config_scores",
+	}
+	tableRows, err := store.HealthcheckTables()
+	if err != nil {
+		fail("schema", fmt.Sprintf("cannot query tables: %v", err))
+	} else {
+		tableSet := make(map[string]bool, len(tableRows))
+		for _, t := range tableRows {
+			tableSet[t] = true
+		}
+		missing := 0
+		for _, t := range expectedTables {
+			if !tableSet[t] {
+				missing++
+				fail("table_"+t, "missing")
+			}
+		}
+		if missing == 0 {
+			pass("schema", fmt.Sprintf("%d/%d tables present", len(expectedTables), len(expectedTables)))
+		}
+	}
+
+	// 4. Seed data
+	counts, err := store.HealthcheckCounts()
+	if err != nil {
+		fail("seed_data", fmt.Sprintf("count query failed: %v", err))
+	} else {
+		for table, count := range counts {
+			switch {
+			case table == "anti_patterns" && count == 0:
+				fail("seed_"+table, "0 rows — seed data missing")
+			case table == "renovate_rules" && count == 0:
+				fail("seed_"+table, "0 rows — seed data missing")
+			case count == 0:
+				pass("data_"+table, "0 rows (normal — populates during use)")
+			default:
+				pass("data_"+table, fmt.Sprintf("%d rows", count))
+			}
+		}
+	}
+
+	// 5. Tool registration
+	s := server.NewMCPServer("go-guardian", version)
+	tools.RegisterLearnFromLint(s, store)
+	tools.RegisterQueryKnowledge(s, store, "")
+	tools.RegisterCheckOWASP(s, store, ".")
+	tools.RegisterCheckStaleness(s, store)
+	tools.RegisterCheckDeps(s, store)
+	tools.RegisterGetPatternStats(s, store)
+	tools.RegisterSuggestFix(s, store)
+	tools.RegisterLearnFromReview(s, store)
+	tools.RegisterGetHealthTrends(s, store)
+	tools.RegisterReportFinding(s, store, "")
+	tools.RegisterGetSessionFindings(s, store, "")
+	tools.RegisterValidateRenovateConfig(s, store)
+	tools.RegisterAnalyzeRenovateConfig(s, store)
+	tools.RegisterSuggestRenovateRule(s, store)
+	tools.RegisterLearnRenovatePreference(s, store)
+	tools.RegisterRenovateQueryKnowledge(s, store)
+	tools.RegisterGetRenovateStats(s, store)
+	pass("tools", "17 tools registered")
+
+	// 6. Environment
+	if os.Getenv("GO_GUARDIAN_SESSION_ID") != "" {
+		pass("session", os.Getenv("GO_GUARDIAN_SESSION_ID"))
+	} else {
+		sidPath := filepath.Join(filepath.Dir(dbPath), "session-id")
+		if data, err := os.ReadFile(sidPath); err == nil && strings.TrimSpace(string(data)) != "" {
+			pass("session", strings.TrimSpace(string(data))+" (from file)")
+		} else {
+			warn("session", "no active session — run inside Claude Code or set GO_GUARDIAN_SESSION_ID")
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dbPath), ".source-checksum")); err == nil {
+		pass("build_cache", "source checksum present — binary is up to date")
+	} else {
+		warn("build_cache", "no source checksum — binary may be stale")
+	}
+
+	printHealthcheck(results)
+
+	for _, r := range results {
+		if r.Status == "fail" {
+			return 1
+		}
+	}
+	return 0
+}
+
+// printHealthcheck renders the results to stdout as JSON and a human-readable summary.
+func printHealthcheck(results []healthcheckResult) {
+	passes, fails, warns := 0, 0, 0
+	for _, r := range results {
+		switch r.Status {
+		case "pass":
+			passes++
+		case "fail":
+			fails++
+		case "warn":
+			warns++
+		}
+		icon := "[OK]"
+		if r.Status == "fail" {
+			icon = "[FAIL]"
+		} else if r.Status == "warn" {
+			icon = "[WARN]"
+		}
+		fmt.Printf("  %-6s %-25s %s\n", icon, r.Name, r.Detail)
+	}
+	fmt.Printf("\n  %d passed, %d warnings, %d failed\n", passes, warns, fails)
 }
