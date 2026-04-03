@@ -83,16 +83,20 @@ binds:
               schema:
                 file: ${OPENAPI_DIR}/github-advisories.json
               host: api.github.com
-              headers:
-                Authorization: "Bearer \${GITHUB_TOKEN}"
-                X-GitHub-Api-Version: "2022-11-28"
+            policies:
+              backendAuth:
+                key: "\${GITHUB_TOKEN}"
+              requestHeaderModifier:
+                set:
+                  X-GitHub-Api-Version: "2022-11-28"
           - name: nvd
             openapi:
               schema:
                 file: ${OPENAPI_DIR}/nvd.json
               host: services.nvd.nist.gov
-              headers:
-                apiKey: "\${NVD_API_KEY}"
+            policies:
+              backendAuth:
+                key: "\${NVD_API_KEY}"
           - name: go-vuln
             openapi:
               schema:
@@ -126,16 +130,20 @@ binds:
               schema:
                 file: /openapi/github-advisories.json
               host: api.github.com
-              headers:
-                Authorization: "Bearer \${GITHUB_TOKEN}"
-                X-GitHub-Api-Version: "2022-11-28"
+            policies:
+              backendAuth:
+                key: "\${GITHUB_TOKEN}"
+              requestHeaderModifier:
+                set:
+                  X-GitHub-Api-Version: "2022-11-28"
           - name: nvd
             openapi:
               schema:
                 file: /openapi/nvd.json
               host: services.nvd.nist.gov
-              headers:
-                apiKey: "\${NVD_API_KEY}"
+            policies:
+              backendAuth:
+                key: "\${NVD_API_KEY}"
           - name: go-vuln
             openapi:
               schema:
