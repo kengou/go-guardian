@@ -20,7 +20,8 @@ if [[ ! -x "${MCP_BIN}" ]]; then
   exit 0
 fi
 
-LINT_TMP="/tmp/go-guardian-lint-$$.txt"
+# SECURITY: use mktemp to avoid predictable temp file symlink attacks.
+LINT_TMP=$(mktemp /tmp/go-guardian-lint.XXXXXX)
 
 # Read hook payload from stdin.
 PAYLOAD=$(cat)

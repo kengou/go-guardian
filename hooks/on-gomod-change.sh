@@ -24,6 +24,11 @@ fi
 PAYLOAD=$(cat)
 GO_MOD=$(echo "${PAYLOAD}" | jq -r '.file_path // ""' 2>/dev/null || true)
 
+# SECURITY: validate file_path is actually a go.mod (prevent path traversal).
+if [[ -n "${GO_MOD}" ]] && [[ "$(basename "${GO_MOD}")" != "go.mod" ]]; then
+  exit 0
+fi
+
 if [[ -z "${GO_MOD}" ]] || [[ ! -f "${GO_MOD}" ]]; then
   GO_MOD="${PWD}/go.mod"
 fi
@@ -31,6 +36,9 @@ fi
 if [[ ! -f "${GO_MOD}" ]]; then
   exit 0
 fi
+
+# SECURITY: use mktemp to avoid predictable temp file symlink attacks.
+PREFETCH_LOG=$(mktemp /tmp/go-guardian-prefetch.XXXXXX)
 
 # Run prefetch in the background so the hook returns immediately.
 NVD_KEY="${NVD_API_KEY:-}"
@@ -40,13 +48,13 @@ if [[ -n "${NVD_KEY}" ]]; then
     --db "${DB_PATH}" \
     --go-mod "${GO_MOD}" \
     --nvd-key "${NVD_KEY}" \
-    >/tmp/go-guardian-prefetch-$$.log 2>&1 &
+    >"${PREFETCH_LOG}" 2>&1 &
 else
   "${MCP_BIN}" \
     --prefetch \
     --db "${DB_PATH}" \
     --go-mod "${GO_MOD}" \
-    >/tmp/go-guardian-prefetch-$$.log 2>&1 &
+    >"${PREFETCH_LOG}" 2>&1 &
 fi
 
 exit 0
