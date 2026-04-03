@@ -87,7 +87,7 @@ binds:
               requestHeaderModifier:
                 set:
                   Authorization: "Bearer \${GITHUB_TOKEN}"
-                  X-GitHub-Api-Version: "2022-11-28"
+                  X-GitHub-Api-Version: "2026-03-10"
           - name: nvd
             openapi:
               schema:
@@ -134,7 +134,7 @@ binds:
               requestHeaderModifier:
                 set:
                   Authorization: "Bearer \${GITHUB_TOKEN}"
-                  X-GitHub-Api-Version: "2022-11-28"
+                  X-GitHub-Api-Version: "2026-03-10"
           - name: nvd
             openapi:
               schema:
