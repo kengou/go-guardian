@@ -79,7 +79,8 @@ Claude Code
 ### Plugin Marketplace (recommended)
 
 ```bash
-claude plugin add github:kengou/go-guardian
+claude plugin marketplace add kengou/go-guardian
+claude plugin install go-guardian@go-guardian-marketplace
 ```
 
 That's it. On first session start, the plugin:
@@ -93,7 +94,7 @@ To share with your team, add to your project's `.claude/settings.json`:
 ```json
 {
   "extraKnownMarketplaces": {
-    "go-guardian": {
+    "go-guardian-marketplace": {
       "source": {
         "source": "github",
         "repo": "kengou/go-guardian"
@@ -101,7 +102,7 @@ To share with your team, add to your project's `.claude/settings.json`:
     }
   },
   "enabledPlugins": {
-    "go-guardian@go-guardian": true
+    "go-guardian@go-guardian-marketplace": true
   }
 }
 ```
@@ -185,7 +186,8 @@ rtk init -g
 
 **Install:**
 ```bash
-claude plugins install beastmode-marketplace/beastmode
+claude plugin marketplace add BugRoger/beastmode
+claude plugin install beastmode@beastmode-marketplace
 ```
 
 **When to use:** Any time you're building or refactoring a non-trivial feature. Run `/plan` before starting, `/implement` to execute, `/validate` before merging.
@@ -196,7 +198,8 @@ claude plugins install beastmode-marketplace/beastmode
 
 **Install:**
 ```bash
-claude plugins install claude-code-workflows/agent-teams
+claude plugin marketplace add wshobson/agents
+claude plugin install agent-teams@claude-code-workflows
 ```
 
 **When to use:** Large PR reviews (>10 files or >500 lines). go-guardian:reviewer automatically delegates Performance and Architecture dimensions to `team-reviewer` agents when it detects a large PR — you don't need to invoke this manually.
@@ -207,7 +210,8 @@ claude plugins install claude-code-workflows/agent-teams
 
 **Install:**
 ```bash
-claude plugins install claude-code-workflows/security-scanning
+# Same marketplace as agent-teams (already added above)
+claude plugin install security-scanning@claude-code-workflows
 ```
 
 **When to use:** When you need more than code-level OWASP scanning. go-guardian:security automatically escalates to `security-auditor` when it detects requests for threat modeling, compliance, or authentication architecture.
@@ -216,11 +220,11 @@ claude plugins install claude-code-workflows/security-scanning
 
 | Plugin | Required | Install command |
 |---|---|---|
-| go-guardian (this repo) | Yes | `claude plugin add github:kengou/go-guardian` |
+| go-guardian (this repo) | Yes | `claude plugin marketplace add kengou/go-guardian` then `claude plugin install go-guardian@go-guardian-marketplace` |
 | rtk | Recommended | `brew install rtk` then `rtk init -g` |
-| beastmode | Recommended | `claude plugins install beastmode-marketplace/beastmode` |
-| agent-teams | Recommended | `claude plugins install claude-code-workflows/agent-teams` |
-| security-scanning | Optional | `claude plugins install claude-code-workflows/security-scanning` |
+| beastmode | Recommended | `claude plugin marketplace add BugRoger/beastmode` then `claude plugin install beastmode@beastmode-marketplace` |
+| agent-teams | Recommended | `claude plugin marketplace add wshobson/agents` then `claude plugin install agent-teams@claude-code-workflows` |
+| security-scanning | Optional | `claude plugin install security-scanning@claude-code-workflows` (same marketplace as agent-teams) |
 
 ---
 
