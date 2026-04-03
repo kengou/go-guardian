@@ -43,7 +43,12 @@
             "description": "Filter by CVSSv3 base severity.",
             "schema": {
               "type": "string",
-              "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ]
             }
           },
           {
@@ -106,7 +111,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — API key invalid or rate limit exceeded"
+            "description": "Forbidden \u2014 API key invalid or rate limit exceeded"
           },
           "404": {
             "description": "No CVEs found matching the specified parameters"
@@ -183,7 +188,12 @@
             }
           }
         },
-        "required": ["resultsPerPage", "startIndex", "totalResults", "vulnerabilities"]
+        "required": [
+          "resultsPerPage",
+          "startIndex",
+          "totalResults",
+          "vulnerabilities"
+        ]
       },
       "CVEItem": {
         "type": "object",
@@ -192,7 +202,9 @@
             "$ref": "#/components/schemas/CVE"
           }
         },
-        "required": ["cve"]
+        "required": [
+          "cve"
+        ]
       },
       "CVE": {
         "type": "object",
@@ -214,7 +226,14 @@
           },
           "vulnStatus": {
             "type": "string",
-            "enum": ["Analyzed", "Awaiting Analysis", "Undergoing Analysis", "Modified", "Deferred", "Rejected"]
+            "enum": [
+              "Analyzed",
+              "Awaiting Analysis",
+              "Undergoing Analysis",
+              "Modified",
+              "Deferred",
+              "Rejected"
+            ]
           },
           "descriptions": {
             "type": "array",
@@ -230,7 +249,10 @@
                   "type": "string"
                 }
               },
-              "required": ["lang", "value"]
+              "required": [
+                "lang",
+                "value"
+              ]
             }
           },
           "metrics": {
@@ -261,15 +283,23 @@
             "items": {
               "type": "object",
               "properties": {
-                "source": { "type": "string" },
-                "type": { "type": "string" },
+                "source": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
                 "description": {
                   "type": "array",
                   "items": {
                     "type": "object",
                     "properties": {
-                      "lang": { "type": "string" },
-                      "value": { "type": "string" }
+                      "lang": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -289,21 +319,40 @@
                     "properties": {
                       "operator": {
                         "type": "string",
-                        "enum": ["AND", "OR"]
+                        "enum": [
+                          "AND",
+                          "OR"
+                        ]
                       },
-                      "negate": { "type": "boolean" },
+                      "negate": {
+                        "type": "boolean"
+                      },
                       "cpeMatch": {
                         "type": "array",
                         "items": {
                           "type": "object",
                           "properties": {
-                            "vulnerable": { "type": "boolean" },
-                            "criteria": { "type": "string" },
-                            "versionStartIncluding": { "type": "string" },
-                            "versionStartExcluding": { "type": "string" },
-                            "versionEndIncluding": { "type": "string" },
-                            "versionEndExcluding": { "type": "string" },
-                            "matchCriteriaId": { "type": "string" }
+                            "vulnerable": {
+                              "type": "boolean"
+                            },
+                            "criteria": {
+                              "type": "string"
+                            },
+                            "versionStartIncluding": {
+                              "type": "string"
+                            },
+                            "versionStartExcluding": {
+                              "type": "string"
+                            },
+                            "versionEndIncluding": {
+                              "type": "string"
+                            },
+                            "versionEndExcluding": {
+                              "type": "string"
+                            },
+                            "matchCriteriaId": {
+                              "type": "string"
+                            }
                           }
                         }
                       }
@@ -318,36 +367,76 @@
             "items": {
               "type": "object",
               "properties": {
-                "url": { "type": "string", "format": "uri" },
-                "source": { "type": "string" },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "source": {
+                  "type": "string"
+                },
                 "tags": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }
           }
         },
-        "required": ["id", "published", "lastModified", "descriptions"]
+        "required": [
+          "id",
+          "published",
+          "lastModified",
+          "descriptions"
+        ]
       },
       "CVSSMetricV31": {
         "type": "object",
         "properties": {
-          "source": { "type": "string" },
-          "type": { "type": "string", "enum": ["Primary", "Secondary"] },
+          "source": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "Primary",
+              "Secondary"
+            ]
+          },
           "cvssData": {
             "type": "object",
             "properties": {
-              "version": { "type": "string" },
-              "vectorString": { "type": "string" },
-              "attackVector": { "type": "string" },
-              "attackComplexity": { "type": "string" },
-              "privilegesRequired": { "type": "string" },
-              "userInteraction": { "type": "string" },
-              "scope": { "type": "string" },
-              "confidentialityImpact": { "type": "string" },
-              "integrityImpact": { "type": "string" },
-              "availabilityImpact": { "type": "string" },
+              "version": {
+                "type": "string"
+              },
+              "vectorString": {
+                "type": "string"
+              },
+              "attackVector": {
+                "type": "string"
+              },
+              "attackComplexity": {
+                "type": "string"
+              },
+              "privilegesRequired": {
+                "type": "string"
+              },
+              "userInteraction": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "confidentialityImpact": {
+                "type": "string"
+              },
+              "integrityImpact": {
+                "type": "string"
+              },
+              "availabilityImpact": {
+                "type": "string"
+              },
               "baseScore": {
                 "type": "number",
                 "minimum": 0,
@@ -355,26 +444,52 @@
               },
               "baseSeverity": {
                 "type": "string",
-                "enum": ["NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+                "enum": [
+                  "NONE",
+                  "LOW",
+                  "MEDIUM",
+                  "HIGH",
+                  "CRITICAL"
+                ]
               }
             }
           },
-          "exploitabilityScore": { "type": "number" },
-          "impactScore": { "type": "number" }
+          "exploitabilityScore": {
+            "type": "number"
+          },
+          "impactScore": {
+            "type": "number"
+          }
         }
       },
       "CVSSMetricV30": {
         "type": "object",
         "properties": {
-          "source": { "type": "string" },
-          "type": { "type": "string", "enum": ["Primary", "Secondary"] },
+          "source": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "Primary",
+              "Secondary"
+            ]
+          },
           "cvssData": {
             "type": "object",
             "properties": {
-              "version": { "type": "string" },
-              "vectorString": { "type": "string" },
-              "baseScore": { "type": "number" },
-              "baseSeverity": { "type": "string" }
+              "version": {
+                "type": "string"
+              },
+              "vectorString": {
+                "type": "string"
+              },
+              "baseScore": {
+                "type": "number"
+              },
+              "baseSeverity": {
+                "type": "string"
+              }
             }
           }
         }

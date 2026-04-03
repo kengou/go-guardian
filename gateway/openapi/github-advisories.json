@@ -50,7 +50,13 @@
             "description": "Filter advisories by severity level.",
             "schema": {
               "type": "string",
-              "enum": ["unknown", "low", "medium", "high", "critical"]
+              "enum": [
+                "unknown",
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
             }
           },
           {
@@ -80,7 +86,11 @@
             "description": "Filter by advisory type.",
             "schema": {
               "type": "string",
-              "enum": ["reviewed", "unreviewed", "malware"]
+              "enum": [
+                "reviewed",
+                "unreviewed",
+                "malware"
+              ]
             }
           },
           {
@@ -156,8 +166,9 @@
             "description": "The GitHub Security Advisory identifier (e.g. GHSA-1234-5678-9abc)."
           },
           "cve_id": {
-            "type": ["string", "null"],
-            "description": "The associated CVE identifier, if any."
+            "type": "string",
+            "description": "The associated CVE identifier, if any.",
+            "nullable": true
           },
           "url": {
             "type": "string",
@@ -173,12 +184,19 @@
             "description": "A short description of the vulnerability."
           },
           "description": {
-            "type": ["string", "null"],
-            "description": "Full description of the vulnerability in Markdown."
+            "type": "string",
+            "description": "Full description of the vulnerability in Markdown.",
+            "nullable": true
           },
           "severity": {
             "type": "string",
-            "enum": ["unknown", "low", "medium", "high", "critical"],
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
             "description": "The overall severity of the advisory."
           },
           "published_at": {
@@ -191,31 +209,40 @@
             "format": "date-time"
           },
           "withdrawn_at": {
-            "type": ["string", "null"],
-            "format": "date-time"
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           },
           "cvss": {
-            "type": ["object", "null"],
+            "type": "object",
             "properties": {
               "vector_string": {
-                "type": ["string", "null"]
+                "type": "string",
+                "nullable": true
               },
               "score": {
-                "type": ["number", "null"],
+                "type": "number",
                 "minimum": 0,
-                "maximum": 10
+                "maximum": 10,
+                "nullable": true
               }
-            }
+            },
+            "nullable": true
           },
           "cwes": {
-            "type": ["array", "null"],
+            "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "cwe_id": { "type": "string" },
-                "name": { "type": "string" }
+                "cwe_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
               }
-            }
+            },
+            "nullable": true
           },
           "identifiers": {
             "type": "array",
@@ -224,7 +251,10 @@
               "properties": {
                 "type": {
                   "type": "string",
-                  "enum": ["CVE", "GHSA"]
+                  "enum": [
+                    "CVE",
+                    "GHSA"
+                  ]
                 },
                 "value": {
                   "type": "string"
@@ -245,14 +275,20 @@
             }
           },
           "vulnerabilities": {
-            "type": ["array", "null"],
+            "type": "array",
             "description": "Packages affected by this advisory.",
             "items": {
               "$ref": "#/components/schemas/Vulnerability"
-            }
+            },
+            "nullable": true
           }
         },
-        "required": ["ghsa_id", "summary", "severity", "published_at"]
+        "required": [
+          "ghsa_id",
+          "summary",
+          "severity",
+          "published_at"
+        ]
       },
       "Vulnerability": {
         "type": "object",
@@ -269,22 +305,37 @@
                 "description": "Package name (e.g. 'github.com/foo/bar')."
               }
             },
-            "required": ["ecosystem", "name"]
+            "required": [
+              "ecosystem",
+              "name"
+            ]
           },
           "severity": {
-            "type": ["string", "null"],
-            "enum": ["unknown", "low", "medium", "high", "critical", null]
+            "type": "string",
+            "enum": [
+              "unknown",
+              "low",
+              "medium",
+              "high",
+              "critical",
+              null
+            ],
+            "nullable": true
           },
           "vulnerable_version_range": {
-            "type": ["string", "null"],
-            "description": "Version range string in which the package is vulnerable (e.g. '>= 1.0.0, < 1.2.3')."
+            "type": "string",
+            "description": "Version range string in which the package is vulnerable (e.g. '>= 1.0.0, < 1.2.3').",
+            "nullable": true
           },
           "first_patched_version": {
-            "type": ["string", "null"],
-            "description": "First version in which the vulnerability is patched."
+            "type": "string",
+            "description": "First version in which the vulnerability is patched.",
+            "nullable": true
           }
         },
-        "required": ["package"]
+        "required": [
+          "package"
+        ]
       }
     }
   }
