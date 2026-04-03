@@ -46,9 +46,9 @@ Every lint finding that gets fixed becomes a DON'T/DO pattern. Those patterns ar
 
 ```
 Claude Code
-├── Skills: /go  /go-review  /go-security  /go-lint  /go-test  /go-patterns  /renovate  /newrelic
+├── Skills: /go  /go-review  /go-security  /go-lint  /go-test  /go-patterns  /go-doctor  /renovate  /newrelic
 ├── Agents: orchestrator  reviewer  security  linter  tester  patterns  advisor  newrelic
-└── Hooks:  session-start  post-bash  pre-write-go  pre-edit-go  on-gomod-change
+└── Hooks:  session-start  post-bash  pre-write-go  pre-edit-go  on-gomod-change  on-task-completed
                     │
                     │ MCP (stdio)
                     ▼
@@ -484,7 +484,7 @@ When installed as a plugin, the session-start hook auto-generates a resolved gat
 | *(unset)* | No gateway. go-guardian via stdio only. |
 | `native` | Starts native `agentgateway` binary. Full config: go-guardian stdio + OpenAPI backends through one SSE endpoint. |
 | `docker` | Starts `cr.agentgateway.dev/agentgateway:1.0.1` container. OpenAPI backends only (go-guardian stays on stdio via plugin). |
-| `1` | Auto-detect: tries native first, falls back to Docker. |
+| `1` | Auto-detect: tries Docker first, falls back to native. |
 
 **Native mode is preferred** for local development — it multiplexes go-guardian + all OpenAPI backends through a single SSE connection. Docker mode requires two MCP connections (stdio for go-guardian, SSE for OpenAPI backends) because the container can't reach the host's Go binary via stdio.
 
@@ -504,7 +504,7 @@ After starting, add the gateway to your settings (one-time):
 
 ```bash
 cd gateway/standalone
-agentgateway --config config.yaml
+agentgateway -f config.yaml
 ```
 
 Exposes go-guardian MCP plus three OpenAPI-backed CVE APIs and the New Relic MCP bridge on port 3000:
@@ -607,6 +607,7 @@ go-guardian/
 │   ├── go-lint/SKILL.md         #   /go-lint
 │   ├── go-test/SKILL.md         #   /go-test
 │   ├── go-patterns/SKILL.md     #   /go-patterns
+│   ├── go-doctor/SKILL.md       #   /go-doctor
 │   ├── renovate/SKILL.md        #   /renovate
 │   └── newrelic/skill.md        #   /newrelic
 ├── hooks/                       # Claude Code hook scripts
@@ -614,7 +615,9 @@ go-guardian/
 │   ├── session-start.sh         #   Build binary + gateway config + staleness check
 │   ├── post-bash.sh             #   Learning loop + auto-prefetch on go.mod changes
 │   ├── pre-write-go.sh          #   Prevention injection before Write tool
-│   └── pre-edit-go.sh           #   Prevention injection before Edit tool
+│   ├── pre-edit-go.sh           #   Prevention injection before Edit tool
+│   ├── on-gomod-change.sh       #   Background CVE prefetch when go.mod changes
+│   └── on-task-completed.sh     #   Quality gate: go build + go vet before task completion
 ├── mcp-server/                  # Go MCP server (the learning engine)
 │   ├── main.go                  #   17 MCP tools registered
 │   ├── go.mod
@@ -690,7 +693,7 @@ After installing, set `USE_BUILTIN_RIPGREP=0` in your environment or settings if
 
 ### MCP server won't start
 
-Run `/doctor` inside Claude Code — it checks for MCP server configuration errors, plugin/agent loading failures, and context usage warnings.
+Run `/go-doctor` inside Claude Code — it runs the MCP server's built-in healthcheck (binary, DB schema, seeds, tools, session, permissions).
 
 Common causes:
 - **Go not installed**: the MCP binary is built from source on first session. Requires Go 1.22+.
