@@ -27,7 +27,7 @@ fi
 # ── Build binary on first use or source change (plugin mode only) ────────────
 if [[ -n "${SOURCE_DIR}" ]] && [[ -d "${SOURCE_DIR}" ]]; then
   CHECKSUM_FILE="${GUARDIAN_DIR}/.source-checksum"
-  CURRENT_CHECKSUM=$(find "${SOURCE_DIR}" -name '*.go' -o -name 'go.sum' | sort | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  CURRENT_CHECKSUM=$(find "${SOURCE_DIR}" -path '*/node_modules' -prune -o -path '*/dist' -prune -o \( -name '*.go' -o -name 'go.sum' \) -print | sort | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
 
   NEEDS_BUILD=false
   if [[ ! -x "${MCP_BIN}" ]]; then

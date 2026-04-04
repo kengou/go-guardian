@@ -271,16 +271,9 @@ func findGoMod(startDir string) string {
 	if err != nil {
 		return ""
 	}
-	for {
-		candidate := filepath.Join(dir, "go.mod")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break // reached root
-		}
-		dir = parent
+	candidate := filepath.Join(dir, "go.mod")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
 	}
 	return ""
 }
