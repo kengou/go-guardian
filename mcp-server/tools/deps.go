@@ -11,7 +11,6 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 const cacheMaxAge = 24 * time.Hour
@@ -27,7 +26,7 @@ type moduleResult struct {
 }
 
 // RegisterCheckDeps registers the check_deps MCP tool with the given server.
-func RegisterCheckDeps(s *server.MCPServer, store *db.Store) {
+func RegisterCheckDeps(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
 		"check_deps",
 		mcp.WithDescription(

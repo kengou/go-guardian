@@ -12,7 +12,7 @@ import (
 )
 
 // RegisterGetRenovateStats registers the get_renovate_stats tool on the MCP server.
-func RegisterGetRenovateStats(s *server.MCPServer, store *db.Store) {
+func RegisterGetRenovateStats(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("get_renovate_stats",
 		mcp.WithDescription("Dashboard showing rule coverage, learned preferences, and config score history"),
 		mcp.WithString("config_path", mcp.Description("Config path for score history (optional)")),

@@ -217,6 +217,11 @@ if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
   echo "export GO_GUARDIAN_SESSION_ID=${SESSION_ID}" >> "${CLAUDE_ENV_FILE}"
 fi
 
+# Persist admin port so the admin UI starts in this session.
+if [[ -n "${GO_GUARDIAN_ADMIN_PORT:-}" ]] && [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
+  echo "export GO_GUARDIAN_ADMIN_PORT=${GO_GUARDIAN_ADMIN_PORT}" >> "${CLAUDE_ENV_FILE}"
+fi
+
 # ── Check for stale scans ───────────────────────────────────────────────────
 if [[ -f "${DB_PATH}" ]]; then
   "${MCP_BIN}" --check-staleness --db "${DB_PATH}" --project "${PWD}" 2>/dev/null \

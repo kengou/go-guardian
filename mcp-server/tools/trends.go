@@ -9,11 +9,10 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // RegisterGetHealthTrends registers the get_health_trends MCP tool.
-func RegisterGetHealthTrends(s *server.MCPServer, store *db.Store) {
+func RegisterGetHealthTrends(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
 		"get_health_trends",
 		mcp.WithDescription(

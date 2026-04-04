@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,8 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kengou/go-guardian/mcp-server/admin"
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/kengou/go-guardian/mcp-server/tools"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -135,25 +139,108 @@ func main() {
 
 	log.Printf("go-guardian MCP server v%s started, db: %s\n", version, *dbPath)
 
+	// Shared prefetch status tracker for admin UI progress reporting.
+	prefetchStatus := &tools.PrefetchStatus{}
+
+	// ── Auto go.mod discovery ─────────────────────────────────────────────
+	// If the default "go.mod" doesn't exist, walk up from the project dir.
+	goMod := *goModPath
+	if _, err := os.Stat(goMod); err != nil {
+		if found := findGoMod(*projectDir); found != "" {
+			goMod = found
+			log.Printf("auto-discovered go.mod: %s", goMod)
+		}
+	}
+
+	// ── Admin UI: start HTTP server if GO_GUARDIAN_ADMIN_PORT is set ──────
+	adminPort := os.Getenv("GO_GUARDIAN_ADMIN_PORT")
+	if adminPort != "" {
+		// Prune old MCP request log entries (>7 days).
+		if pruned, err := store.PruneMCPRequests(7 * 24 * time.Hour); err != nil {
+			log.Printf("warning: prune mcp_requests failed: %v", err)
+		} else if pruned > 0 {
+			log.Printf("admin: pruned %d old request log entries", pruned)
+		}
+
+		// Serve the embedded frontend from admin/ui/dist.
+		staticFS, err := fs.Sub(admin.UIAssets, "ui/dist")
+		if err != nil {
+			log.Printf("warning: admin UI assets not available: %v", err)
+		} else {
+			adminSrv := admin.New(store, staticFS, sessionID,
+				admin.WithPrefetchStatus(prefetchStatus))
+			addr := "127.0.0.1:" + adminPort
+			go func() {
+				log.Printf("admin UI: http://%s", addr)
+				if err := adminSrv.ListenAndServe(addr); err != nil && err != http.ErrServerClosed {
+					log.Printf("admin server error: %v", err)
+				}
+			}()
+		}
+	}
+
+	// Background CVE prefetch: populate vuln_cache so the admin UI and
+	// check_deps have data. Runs once on startup and then daily.
+	runPrefetch := func() {
+		if _, err := os.Stat(goMod); err != nil {
+			return
+		}
+		log.Printf("background prefetch: starting for %s", goMod)
+		prefetchStatus.SetPhase("go-vuln", "vuln.go.dev")
+		result, err := tools.FetchVulns(context.Background(), store, tools.FetchOptions{
+			GoModPath: goMod,
+			NVDAPIKey: *nvdKey,
+			Quiet:     true,
+			Status:    prefetchStatus,
+		})
+		if err != nil {
+			log.Printf("background prefetch failed: %v", err)
+			prefetchStatus.SetError(err.Error())
+			return
+		}
+		log.Printf("background prefetch: %d modules checked, %d CVEs found, %d enriched via NVD",
+			result.ModulesChecked, result.CVEsFound, result.CVEsEnriched)
+	}
+
+	// Run initial prefetch in background.
+	go runPrefetch()
+
+	// Daily refresh ticker.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Printf("daily CVE refresh: starting")
+			runPrefetch()
+		}
+	}()
+
 	// Create the MCP server and register all tools.
 	s := server.NewMCPServer("go-guardian", version)
-	tools.RegisterLearnFromLint(s, store)
-	tools.RegisterQueryKnowledge(s, store, sessionID)
-	tools.RegisterCheckOWASP(s, store, *projectDir)
-	tools.RegisterCheckStaleness(s, store)
-	tools.RegisterCheckDeps(s, store)
-	tools.RegisterGetPatternStats(s, store)
-	tools.RegisterSuggestFix(s, store)
-	tools.RegisterLearnFromReview(s, store)
-	tools.RegisterGetHealthTrends(s, store)
-	tools.RegisterReportFinding(s, store, sessionID)
-	tools.RegisterGetSessionFindings(s, store, sessionID)
-	tools.RegisterValidateRenovateConfig(s, store)
-	tools.RegisterAnalyzeRenovateConfig(s, store)
-	tools.RegisterSuggestRenovateRule(s, store)
-	tools.RegisterLearnRenovatePreference(s, store)
-	tools.RegisterRenovateQueryKnowledge(s, store)
-	tools.RegisterGetRenovateStats(s, store)
+
+	// If admin UI is enabled, wrap tool registration to log invocations.
+	var reg tools.ToolRegistrar = s
+	if adminPort != "" {
+		reg = &loggingRegistrar{inner: s, store: store}
+	}
+
+	tools.RegisterLearnFromLint(reg, store)
+	tools.RegisterQueryKnowledge(reg, store, sessionID)
+	tools.RegisterCheckOWASP(reg, store, *projectDir)
+	tools.RegisterCheckStaleness(reg, store)
+	tools.RegisterCheckDeps(reg, store)
+	tools.RegisterGetPatternStats(reg, store)
+	tools.RegisterSuggestFix(reg, store)
+	tools.RegisterLearnFromReview(reg, store)
+	tools.RegisterGetHealthTrends(reg, store)
+	tools.RegisterReportFinding(reg, store, sessionID)
+	tools.RegisterGetSessionFindings(reg, store, sessionID)
+	tools.RegisterValidateRenovateConfig(reg, store)
+	tools.RegisterAnalyzeRenovateConfig(reg, store)
+	tools.RegisterSuggestRenovateRule(reg, store)
+	tools.RegisterLearnRenovatePreference(reg, store)
+	tools.RegisterRenovateQueryKnowledge(reg, store)
+	tools.RegisterGetRenovateStats(reg, store)
 
 	log.Printf("registered 17 tools: learn_from_lint, learn_from_review, query_knowledge, check_owasp, check_staleness, check_deps, get_pattern_stats, suggest_fix, get_health_trends, report_finding, get_session_findings, validate_renovate_config, analyze_renovate_config, suggest_renovate_rule, learn_renovate_preference, query_renovate_knowledge, get_renovate_stats\n")
 
@@ -161,6 +248,41 @@ func main() {
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("MCP server error: %v", err)
 	}
+}
+
+// loggingRegistrar wraps MCP tool registration to log every tool invocation
+// to the mcp_requests table for the admin activity log.
+type loggingRegistrar struct {
+	inner *server.MCPServer
+	store *db.Store
+}
+
+func (l *loggingRegistrar) AddTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
+	l.inner.AddTool(tool, admin.WrapToolHandler(l.store, tool.Name, handler))
+}
+
+// findGoMod walks up from startDir looking for go.mod. Returns the path if
+// found, or empty string if not.
+func findGoMod(startDir string) string {
+	if startDir == "" {
+		startDir = "."
+	}
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return ""
+	}
+	for {
+		candidate := filepath.Join(dir, "go.mod")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // reached root
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // ── --check-staleness implementation ────────────────────────────────────────

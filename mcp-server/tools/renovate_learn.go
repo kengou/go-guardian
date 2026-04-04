@@ -11,7 +11,7 @@ import (
 )
 
 // RegisterLearnRenovatePreference registers the learn_renovate_preference MCP tool on the server.
-func RegisterLearnRenovatePreference(s *server.MCPServer, store *db.Store) {
+func RegisterLearnRenovatePreference(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("learn_renovate_preference",
 		mcp.WithDescription(
 			"Record a Renovate configuration preference so future suggestions "+

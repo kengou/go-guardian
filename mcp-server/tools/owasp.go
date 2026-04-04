@@ -14,13 +14,12 @@ import (
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/kengou/go-guardian/mcp-server/owasp"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // RegisterCheckOWASP registers the check_owasp MCP tool.
 // projectRoot is the absolute path to the project being guarded;
 // scan paths are validated to be within this root (fixes FINDING-07).
-func RegisterCheckOWASP(s *server.MCPServer, store *db.Store, projectRoot string) {
+func RegisterCheckOWASP(s ToolRegistrar, store *db.Store, projectRoot string) {
 	tool := mcp.NewTool(
 		"check_owasp",
 		mcp.WithDescription("Scan Go source files for OWASP Top 10 security issues (A02, A03, A05, A09, A10)."),

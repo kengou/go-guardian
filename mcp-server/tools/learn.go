@@ -44,7 +44,7 @@ var lintLineRe = regexp.MustCompile(
 )
 
 // RegisterLearnFromLint registers the learn_from_lint MCP tool with the given server.
-func RegisterLearnFromLint(s *server.MCPServer, store *db.Store) {
+func RegisterLearnFromLint(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
 		"learn_from_lint",
 		mcp.WithDescription(

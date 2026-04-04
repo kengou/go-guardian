@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS lint_patterns (
     source TEXT NOT NULL DEFAULT 'learned',
     last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME DEFAULT NULL,
     UNIQUE(rule, file_glob, dont_code)
 );
 
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS vuln_cache (
     affected_versions TEXT NOT NULL,
     fixed_version TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'go-vuln',
     fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(module, cve_id)
 );
@@ -51,7 +53,8 @@ CREATE TABLE IF NOT EXISTS anti_patterns (
     do_code TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'notque',
     category TEXT NOT NULL DEFAULT 'general',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS dep_decisions (
@@ -97,3 +100,29 @@ CREATE INDEX IF NOT EXISTS idx_session_findings_session
     ON session_findings(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_findings_lookup
     ON session_findings(session_id, agent);
+
+CREATE TABLE IF NOT EXISTS mcp_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    agent TEXT NOT NULL DEFAULT '',
+    params_summary TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_requests_created
+    ON mcp_requests(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_requests_tool
+    ON mcp_requests(tool_name);
+
+CREATE TABLE IF NOT EXISTS pattern_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_type TEXT NOT NULL,
+    pattern_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    before_snapshot TEXT NOT NULL DEFAULT '{}',
+    after_snapshot TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pattern_history_lookup
+    ON pattern_history(pattern_type, pattern_id, created_at DESC);

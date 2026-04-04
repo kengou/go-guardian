@@ -49,7 +49,7 @@ func renovateCategoryFromProblem(problem string) string {
 }
 
 // RegisterSuggestRenovateRule registers the suggest_renovate_rule MCP tool on the server.
-func RegisterSuggestRenovateRule(s *server.MCPServer, store *db.Store) {
+func RegisterSuggestRenovateRule(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("suggest_renovate_rule",
 		mcp.WithDescription(
 			"Suggest Renovate configuration rules for a given problem. "+

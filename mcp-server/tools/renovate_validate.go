@@ -25,7 +25,7 @@ var deprecatedOptions = map[string]string{
 }
 
 // RegisterValidateRenovateConfig registers the validate_renovate_config tool on the MCP server.
-func RegisterValidateRenovateConfig(s *server.MCPServer, store *db.Store) {
+func RegisterValidateRenovateConfig(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("validate_renovate_config",
 		mcp.WithDescription("Validate a Renovate JSON configuration file. Checks syntax, deprecated options, structure, and optionally runs a dry-run if RENOVATE_TOKEN is set."),
 		mcp.WithString("config_path", mcp.Required(), mcp.Description("Path to the Renovate JSON configuration file to validate")),
