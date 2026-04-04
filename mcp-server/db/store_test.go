@@ -606,7 +606,7 @@ func TestRecentLearningCount(t *testing.T) {
 	}
 
 	// Count for 0 days should still include today's patterns.
-	count, err = s.RecentLearningCount(0)
+	_, err = s.RecentLearningCount(0)
 	if err != nil {
 		t.Fatalf("RecentLearningCount(0): %v", err)
 	}
