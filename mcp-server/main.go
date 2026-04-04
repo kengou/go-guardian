@@ -24,7 +24,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 func main() {
 	dbPath := flag.String("db", ".go-guardian/guardian.db", "path to the SQLite database file")
