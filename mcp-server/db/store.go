@@ -27,16 +27,21 @@ type LintPattern struct {
 	Frequency int64
 	Source    string
 	LastSeen  time.Time
+	CreatedAt time.Time
+	DeletedAt *time.Time
 }
 
 // AntiPattern represents a known anti-pattern stored in the database.
 type AntiPattern struct {
+	ID          int64
 	PatternID   string
 	Description string
 	DontCode    string
 	DoCode      string
 	Source      string
 	Category    string
+	CreatedAt   time.Time
+	DeletedAt   *time.Time
 }
 
 // OWASPFinding represents a stored OWASP finding.
@@ -57,6 +62,7 @@ type VulnEntry struct {
 	AffectedVersions string
 	FixedVersion     string
 	Description      string
+	Source           string // "go-vuln" or "nvd"
 	FetchedAt        time.Time
 }
 
@@ -130,6 +136,25 @@ type PatternStats struct {
 	TotalLintPatterns int64
 	TotalAntiPatterns int64
 	RecentScans       []ScanHistory
+}
+
+// PatternHistory represents an audit log entry for pattern changes.
+type PatternHistory struct {
+	ID             int64
+	PatternType    string // "lint" or "anti"
+	PatternID      int64
+	Action         string // "edit", "delete", "restore"
+	BeforeSnapshot string // JSON
+	AfterSnapshot  string // JSON
+	CreatedAt      time.Time
+}
+
+// QualitySuggestion represents a server-side analysis suggestion for pattern quality.
+type QualitySuggestion struct {
+	Type        string  // "empty_do_code", "low_frequency", "duplicate_dont_code"
+	PatternIDs  []int64
+	Description string
+	Action      string // "update", "merge", "remove"
 }
 
 // Store is the database access layer.
@@ -234,8 +259,28 @@ func (s *Store) HealthcheckCounts() (map[string]int64, error) {
 
 // runSchema executes the inlined DDL statements to create all tables and indexes.
 func runSchema(db *sql.DB) error {
-	_, err := db.Exec(schemaStatements)
-	return err
+	if _, err := db.Exec(schemaStatements); err != nil {
+		return err
+	}
+	// Soft-delete migration: add deleted_at column to existing tables.
+	addColumnIfNotExists(db, "lint_patterns", "deleted_at", "DATETIME DEFAULT NULL")
+	addColumnIfNotExists(db, "anti_patterns", "deleted_at", "DATETIME DEFAULT NULL")
+	// Vuln source tracking migration.
+	addColumnIfNotExists(db, "vuln_cache", "source", "TEXT NOT NULL DEFAULT 'go-vuln'")
+	return nil
+}
+
+// addColumnIfNotExists attempts to add a column to a table, silently ignoring
+// the error if the column already exists (duplicate column name).
+func addColumnIfNotExists(db *sql.DB, table, column, colType string) {
+	q := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType)
+	_, err := db.Exec(q)
+	if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+		return // column already exists — safe to ignore
+	}
+	if err != nil {
+		log.Printf("[go-guardian] warning: add column %s.%s: %v", table, column, err)
+	}
 }
 
 // runSeedFiles reads and executes all *.sql files from the embedded seed
@@ -280,10 +325,11 @@ func (s *Store) InsertLintPattern(rule, fileGlob, dontCode, doCode, source strin
 INSERT INTO lint_patterns (rule, file_glob, dont_code, do_code, source)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(rule, file_glob, dont_code) DO UPDATE SET
-    frequency = frequency + 1,
-    last_seen = CURRENT_TIMESTAMP,
-    do_code   = excluded.do_code,
-    source    = excluded.source`
+    frequency  = frequency + 1,
+    last_seen  = CURRENT_TIMESTAMP,
+    do_code    = excluded.do_code,
+    source     = excluded.source,
+    deleted_at = NULL`
 	_, err := s.db.Exec(q, rule, fileGlob, dontCode, doCode, source)
 	return err
 }
@@ -303,7 +349,7 @@ func (s *Store) QueryPatterns(fileGlob, codeContext string, limit int) ([]LintPa
 	const q = `
 SELECT id, rule, file_glob, dont_code, do_code, frequency, source, last_seen
 FROM lint_patterns
-WHERE file_glob LIKE ? ESCAPE '\'
+WHERE file_glob LIKE ? ESCAPE '\' AND deleted_at IS NULL
 ORDER BY frequency DESC
 LIMIT ?`
 	rows, err := s.db.Query(q, "%"+escapeLike(fileGlob)+"%", limit)
@@ -430,11 +476,11 @@ func (s *Store) QueryAntiPatterns(category string) ([]AntiPattern, error) {
 	)
 	if category == "" {
 		rows, err = s.db.Query(
-			`SELECT pattern_id, description, dont_code, do_code, source, category FROM anti_patterns`,
+			`SELECT pattern_id, description, dont_code, do_code, source, category FROM anti_patterns WHERE deleted_at IS NULL`,
 		)
 	} else {
 		rows, err = s.db.Query(
-			`SELECT pattern_id, description, dont_code, do_code, source, category FROM anti_patterns WHERE category=?`,
+			`SELECT pattern_id, description, dont_code, do_code, source, category FROM anti_patterns WHERE category=? AND deleted_at IS NULL`,
 			category,
 		)
 	}
@@ -456,24 +502,25 @@ func (s *Store) QueryAntiPatterns(category string) ([]AntiPattern, error) {
 }
 
 // UpsertVulnCache inserts or updates a vulnerability cache entry.
-func (s *Store) UpsertVulnCache(module, cveID, severity, affected, fixed, description string) error {
+func (s *Store) UpsertVulnCache(module, cveID, severity, affected, fixed, description, source string) error {
 	const q = `
-INSERT INTO vuln_cache (module, cve_id, severity, affected_versions, fixed_version, description)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO vuln_cache (module, cve_id, severity, affected_versions, fixed_version, description, source)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(module, cve_id) DO UPDATE SET
     severity          = excluded.severity,
     affected_versions = excluded.affected_versions,
     fixed_version     = excluded.fixed_version,
     description       = excluded.description,
+    source            = excluded.source,
     fetched_at        = CURRENT_TIMESTAMP`
-	_, err := s.db.Exec(q, module, cveID, severity, affected, fixed, description)
+	_, err := s.db.Exec(q, module, cveID, severity, affected, fixed, description, source)
 	return err
 }
 
 // GetVulnCache retrieves all cached vulnerabilities for the given module.
 func (s *Store) GetVulnCache(module string) ([]VulnEntry, error) {
 	const q = `
-SELECT module, cve_id, severity, affected_versions, fixed_version, description, fetched_at
+SELECT module, cve_id, severity, affected_versions, fixed_version, description, source, fetched_at
 FROM vuln_cache
 WHERE module=?`
 	rows, err := s.db.Query(q, module)
@@ -487,7 +534,7 @@ WHERE module=?`
 		var e VulnEntry
 		var fetchedAt string
 		if err := rows.Scan(&e.Module, &e.CVEID, &e.Severity, &e.AffectedVersions,
-			&e.FixedVersion, &e.Description, &fetchedAt); err != nil {
+			&e.FixedVersion, &e.Description, &e.Source, &fetchedAt); err != nil {
 			return nil, err
 		}
 		e.FetchedAt, _ = parseSQLiteTime(fetchedAt)
@@ -525,6 +572,62 @@ func (s *Store) GetDepDecision(module string) (*DepDecision, error) {
 	}
 	d.CheckedAt, _ = parseSQLiteTime(checkedAt)
 	return &d, nil
+}
+
+// GetAllVulnEntries returns all vulnerability cache entries, ordered by
+// severity descending then module ascending. Default limit is 500 if <= 0.
+func (s *Store) GetAllVulnEntries(limit int) ([]VulnEntry, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	const q = `
+SELECT module, cve_id, severity, affected_versions, fixed_version, description, source, fetched_at
+FROM vuln_cache
+ORDER BY severity DESC, module ASC
+LIMIT ?`
+	rows, err := s.db.Query(q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []VulnEntry
+	for rows.Next() {
+		var e VulnEntry
+		var fetchedAt string
+		if err := rows.Scan(&e.Module, &e.CVEID, &e.Severity, &e.AffectedVersions,
+			&e.FixedVersion, &e.Description, &e.Source, &fetchedAt); err != nil {
+			return nil, err
+		}
+		e.FetchedAt, _ = parseSQLiteTime(fetchedAt)
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetAllDepDecisions returns all dependency decisions, ordered by checked_at descending.
+func (s *Store) GetAllDepDecisions() ([]DepDecision, error) {
+	const q = `
+SELECT module, decision, reason, cve_count, checked_at
+FROM dep_decisions
+ORDER BY checked_at DESC`
+	rows, err := s.db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var decisions []DepDecision
+	for rows.Next() {
+		var d DepDecision
+		var checkedAt string
+		if err := rows.Scan(&d.Module, &d.Decision, &d.Reason, &d.CVECount, &checkedAt); err != nil {
+			return nil, err
+		}
+		d.CheckedAt, _ = parseSQLiteTime(checkedAt)
+		decisions = append(decisions, d)
+	}
+	return decisions, rows.Err()
 }
 
 // GetScanHistory retrieves all scan history records for the given project,
@@ -566,6 +669,7 @@ func (s *Store) GetPatternStats(project string) (*PatternStats, error) {
 	const topQ = `
 SELECT id, rule, file_glob, dont_code, do_code, frequency, source, last_seen
 FROM lint_patterns
+WHERE deleted_at IS NULL
 ORDER BY frequency DESC
 LIMIT 10`
 	topRows, err := s.db.Query(topQ)
@@ -607,9 +711,9 @@ LIMIT 10`
 	}
 
 	// Total counts for lint and anti-patterns in a single query.
-	const countQ = `SELECT 'lint' AS type, COUNT(*) AS cnt FROM lint_patterns
+	const countQ = `SELECT 'lint' AS type, COUNT(*) AS cnt FROM lint_patterns WHERE deleted_at IS NULL
 UNION ALL
-SELECT 'anti', COUNT(*) FROM anti_patterns`
+SELECT 'anti', COUNT(*) FROM anti_patterns WHERE deleted_at IS NULL`
 	countRows, err := s.db.Query(countQ)
 	if err != nil {
 		return nil, fmt.Errorf("total counts: %w", err)
@@ -658,6 +762,14 @@ LIMIT 10`
 	}
 
 	return stats, nil
+}
+
+// RecentLearningCount returns the number of lint patterns created in the last N days.
+func (s *Store) RecentLearningCount(days int) (int64, error) {
+	var count int64
+	q := fmt.Sprintf(`SELECT COUNT(*) FROM lint_patterns WHERE created_at >= datetime('now', '-%d days') AND deleted_at IS NULL`, days)
+	err := s.db.QueryRow(q).Scan(&count)
+	return count, err
 }
 
 // ── Scan Snapshots (trend tracking) ──────────────────────────────────────────
@@ -831,6 +943,83 @@ func sessionFindingsFromRows(rows *sql.Rows) ([]SessionFinding, error) {
 	return findings, rows.Err()
 }
 
+// MCPRequest represents a logged MCP tool invocation for the admin activity log.
+type MCPRequest struct {
+	ID            int64
+	ToolName      string
+	Agent         string
+	ParamsSummary string
+	DurationMS    int64
+	Error         string
+	CreatedAt     time.Time
+}
+
+// ── MCP Request Logging (admin activity log) ────────────────────────────────
+
+// InsertMCPRequest logs an MCP tool invocation.
+func (s *Store) InsertMCPRequest(toolName, agent, paramsSummary string, durationMS int64, errMsg string) error {
+	const q = `
+INSERT INTO mcp_requests (tool_name, agent, params_summary, duration_ms, error)
+VALUES (?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(q, toolName, agent, paramsSummary, durationMS, errMsg)
+	return err
+}
+
+// GetMCPRequests returns recent MCP tool invocations, optionally filtered by
+// tool_name and/or agent. Results are ordered most-recent first.
+func (s *Store) GetMCPRequests(toolName, agent string, limit, offset int) ([]MCPRequest, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var conditions []string
+	var args []any
+	if toolName != "" {
+		conditions = append(conditions, "tool_name = ?")
+		args = append(args, toolName)
+	}
+	if agent != "" {
+		conditions = append(conditions, "agent = ?")
+		args = append(args, agent)
+	}
+	q := "SELECT id, tool_name, agent, params_summary, duration_ms, error, created_at FROM mcp_requests"
+	if len(conditions) > 0 {
+		q += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	q += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var requests []MCPRequest
+	for rows.Next() {
+		var r MCPRequest
+		var createdAt string
+		if err := rows.Scan(&r.ID, &r.ToolName, &r.Agent, &r.ParamsSummary,
+			&r.DurationMS, &r.Error, &createdAt); err != nil {
+			return nil, err
+		}
+		r.CreatedAt, _ = parseSQLiteTime(createdAt)
+		requests = append(requests, r)
+	}
+	return requests, rows.Err()
+}
+
+// PruneMCPRequests deletes mcp_requests entries older than the given duration.
+// Returns the number of rows deleted.
+func (s *Store) PruneMCPRequests(olderThan time.Duration) (int64, error) {
+	const q = `DELETE FROM mcp_requests WHERE created_at < datetime('now', ?)`
+	threshold := fmt.Sprintf("-%d seconds", int(olderThan.Seconds()))
+	result, err := s.db.Exec(q, threshold)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // parseSQLiteTime parses the datetime formats that SQLite's CURRENT_TIMESTAMP
 // may produce. Returns the zero time on parse failure (error is discarded by
 // callers via the blank identifier).
@@ -863,6 +1052,7 @@ CREATE TABLE IF NOT EXISTS lint_patterns (
     source TEXT NOT NULL DEFAULT 'learned',
     last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME DEFAULT NULL,
     UNIQUE(rule, file_glob, dont_code)
 );
 
@@ -885,6 +1075,7 @@ CREATE TABLE IF NOT EXISTS vuln_cache (
     affected_versions TEXT NOT NULL,
     fixed_version TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'go-vuln',
     fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(module, cve_id)
 );
@@ -906,7 +1097,8 @@ CREATE TABLE IF NOT EXISTS anti_patterns (
     do_code TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'notque',
     category TEXT NOT NULL DEFAULT 'general',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS dep_decisions (
@@ -991,6 +1183,32 @@ CREATE TABLE IF NOT EXISTS config_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_config_scores_path
     ON config_scores(config_path, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS mcp_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    agent TEXT NOT NULL DEFAULT '',
+    params_summary TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_requests_created
+    ON mcp_requests(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_requests_tool
+    ON mcp_requests(tool_name);
+
+CREATE TABLE IF NOT EXISTS pattern_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_type TEXT NOT NULL,
+    pattern_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    before_snapshot TEXT NOT NULL DEFAULT '{}',
+    after_snapshot TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pattern_history_lookup
+    ON pattern_history(pattern_type, pattern_id, created_at DESC);
 `
 
 // --- Renovate Preferences ---
@@ -1211,4 +1429,368 @@ func (s *Store) TotalRenovateRuleCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM renovate_rules`).Scan(&count)
 	return count, err
+}
+
+// ── Pattern Management (admin UI) ──────────────────────────────────────────
+
+// InsertPatternHistory records an audit log entry for a pattern change.
+func (s *Store) InsertPatternHistory(patternType string, patternID int64, action, beforeSnapshot, afterSnapshot string) error {
+	const q = `
+INSERT INTO pattern_history (pattern_type, pattern_id, action, before_snapshot, after_snapshot)
+VALUES (?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(q, patternType, patternID, action, beforeSnapshot, afterSnapshot)
+	return err
+}
+
+// GetPatternHistory returns audit log entries for a specific pattern,
+// ordered most-recent first.
+func (s *Store) GetPatternHistory(patternType string, patternID int64) ([]PatternHistory, error) {
+	const q = `
+SELECT id, pattern_type, pattern_id, action, before_snapshot, after_snapshot, created_at
+FROM pattern_history
+WHERE pattern_type=? AND pattern_id=?
+ORDER BY created_at DESC, id DESC`
+	rows, err := s.db.Query(q, patternType, patternID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return patternHistoryFromRows(rows)
+}
+
+// GetRecentPatternHistory returns the most recent audit log entries across
+// all patterns, ordered most-recent first.
+func (s *Store) GetRecentPatternHistory(limit int) ([]PatternHistory, error) {
+	const q = `
+SELECT id, pattern_type, pattern_id, action, before_snapshot, after_snapshot, created_at
+FROM pattern_history
+ORDER BY created_at DESC, id DESC
+LIMIT ?`
+	rows, err := s.db.Query(q, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return patternHistoryFromRows(rows)
+}
+
+func patternHistoryFromRows(rows *sql.Rows) ([]PatternHistory, error) {
+	var entries []PatternHistory
+	for rows.Next() {
+		var h PatternHistory
+		var createdAt string
+		if err := rows.Scan(&h.ID, &h.PatternType, &h.PatternID, &h.Action,
+			&h.BeforeSnapshot, &h.AfterSnapshot, &createdAt); err != nil {
+			return nil, err
+		}
+		h.CreatedAt, _ = parseSQLiteTime(createdAt)
+		entries = append(entries, h)
+	}
+	return entries, rows.Err()
+}
+
+// GetAllLintPatterns returns lint patterns for the admin browser with search,
+// filter, sort, pagination, and optional soft-deleted pattern inclusion.
+func (s *Store) GetAllLintPatterns(search, source, rule, sortBy string, includeDeleted bool, limit, offset int) ([]LintPattern, int64, error) {
+	var conditions []string
+	var args []any
+
+	if !includeDeleted {
+		conditions = append(conditions, "deleted_at IS NULL")
+	}
+	if search != "" {
+		pattern := "%" + escapeLike(search) + "%"
+		conditions = append(conditions, "(rule LIKE ? ESCAPE '\\' OR dont_code LIKE ? ESCAPE '\\' OR do_code LIKE ? ESCAPE '\\' OR file_glob LIKE ? ESCAPE '\\')")
+		args = append(args, pattern, pattern, pattern, pattern)
+	}
+	if source != "" {
+		conditions = append(conditions, "source = ?")
+		args = append(args, source)
+	}
+	if rule != "" {
+		conditions = append(conditions, "rule = ?")
+		args = append(args, rule)
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Count total matching rows.
+	var total int64
+	countQ := "SELECT COUNT(*) FROM lint_patterns" + whereClause
+	if err := s.db.QueryRow(countQ, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count lint patterns: %w", err)
+	}
+
+	// Determine sort order.
+	orderBy := "frequency DESC"
+	switch sortBy {
+	case "last_seen":
+		orderBy = "last_seen DESC"
+	case "created_at":
+		orderBy = "created_at DESC"
+	}
+
+	q := "SELECT id, rule, file_glob, dont_code, do_code, frequency, source, last_seen, created_at, deleted_at FROM lint_patterns" +
+		whereClause + " ORDER BY " + orderBy + " LIMIT ? OFFSET ?"
+	queryArgs := append(args, limit, offset)
+
+	rows, err := s.db.Query(q, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var patterns []LintPattern
+	for rows.Next() {
+		var p LintPattern
+		var lastSeen, createdAt string
+		var deletedAt sql.NullString
+		if err := rows.Scan(&p.ID, &p.Rule, &p.FileGlob, &p.DontCode, &p.DoCode,
+			&p.Frequency, &p.Source, &lastSeen, &createdAt, &deletedAt); err != nil {
+			return nil, 0, err
+		}
+		p.LastSeen, _ = parseSQLiteTime(lastSeen)
+		p.CreatedAt, _ = parseSQLiteTime(createdAt)
+		if deletedAt.Valid {
+			t, _ := parseSQLiteTime(deletedAt.String)
+			p.DeletedAt = &t
+		}
+		patterns = append(patterns, p)
+	}
+	return patterns, total, rows.Err()
+}
+
+// GetLintPatternByID returns a single lint pattern by ID (including soft-deleted ones).
+func (s *Store) GetLintPatternByID(id int64) (*LintPattern, error) {
+	const q = `
+SELECT id, rule, file_glob, dont_code, do_code, frequency, source, last_seen, created_at, deleted_at
+FROM lint_patterns WHERE id=?`
+	var p LintPattern
+	var lastSeen, createdAt string
+	var deletedAt sql.NullString
+	err := s.db.QueryRow(q, id).Scan(&p.ID, &p.Rule, &p.FileGlob, &p.DontCode, &p.DoCode,
+		&p.Frequency, &p.Source, &lastSeen, &createdAt, &deletedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.LastSeen, _ = parseSQLiteTime(lastSeen)
+	p.CreatedAt, _ = parseSQLiteTime(createdAt)
+	if deletedAt.Valid {
+		t, _ := parseSQLiteTime(deletedAt.String)
+		p.DeletedAt = &t
+	}
+	return &p, nil
+}
+
+// UpdateLintPattern updates the mutable fields of a lint pattern.
+func (s *Store) UpdateLintPattern(id int64, dontCode, doCode, rule, fileGlob string) error {
+	const q = `UPDATE lint_patterns SET dont_code=?, do_code=?, rule=?, file_glob=? WHERE id=?`
+	_, err := s.db.Exec(q, dontCode, doCode, rule, fileGlob, id)
+	return err
+}
+
+// SoftDeleteLintPattern marks a lint pattern as deleted.
+func (s *Store) SoftDeleteLintPattern(id int64) error {
+	const q = `UPDATE lint_patterns SET deleted_at = CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL`
+	_, err := s.db.Exec(q, id)
+	return err
+}
+
+// RestoreLintPattern clears the deleted_at flag on a soft-deleted lint pattern.
+func (s *Store) RestoreLintPattern(id int64) error {
+	const q = `UPDATE lint_patterns SET deleted_at = NULL WHERE id=? AND deleted_at IS NOT NULL`
+	_, err := s.db.Exec(q, id)
+	return err
+}
+
+// GetAllAntiPatterns returns anti-patterns for the admin browser with search,
+// filter, pagination, and optional soft-deleted pattern inclusion.
+func (s *Store) GetAllAntiPatterns(search, category string, includeDeleted bool, limit, offset int) ([]AntiPattern, int64, error) {
+	var conditions []string
+	var args []any
+
+	if !includeDeleted {
+		conditions = append(conditions, "deleted_at IS NULL")
+	}
+	if search != "" {
+		pattern := "%" + escapeLike(search) + "%"
+		conditions = append(conditions, "(pattern_id LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR dont_code LIKE ? ESCAPE '\\' OR do_code LIKE ? ESCAPE '\\')")
+		args = append(args, pattern, pattern, pattern, pattern)
+	}
+	if category != "" {
+		conditions = append(conditions, "category = ?")
+		args = append(args, category)
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	var total int64
+	countQ := "SELECT COUNT(*) FROM anti_patterns" + whereClause
+	if err := s.db.QueryRow(countQ, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count anti patterns: %w", err)
+	}
+
+	q := "SELECT id, pattern_id, description, dont_code, do_code, source, category, created_at, deleted_at FROM anti_patterns" +
+		whereClause + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	queryArgs := append(args, limit, offset)
+
+	rows, err := s.db.Query(q, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var aps []AntiPattern
+	for rows.Next() {
+		var ap AntiPattern
+		var createdAt string
+		var deletedAt sql.NullString
+		if err := rows.Scan(&ap.ID, &ap.PatternID, &ap.Description, &ap.DontCode, &ap.DoCode,
+			&ap.Source, &ap.Category, &createdAt, &deletedAt); err != nil {
+			return nil, 0, err
+		}
+		ap.CreatedAt, _ = parseSQLiteTime(createdAt)
+		if deletedAt.Valid {
+			t, _ := parseSQLiteTime(deletedAt.String)
+			ap.DeletedAt = &t
+		}
+		aps = append(aps, ap)
+	}
+	return aps, total, rows.Err()
+}
+
+// GetAntiPatternByID returns a single anti-pattern by ID (including soft-deleted ones).
+func (s *Store) GetAntiPatternByID(id int64) (*AntiPattern, error) {
+	const q = `
+SELECT id, pattern_id, description, dont_code, do_code, source, category, created_at, deleted_at
+FROM anti_patterns WHERE id=?`
+	var ap AntiPattern
+	var createdAt string
+	var deletedAt sql.NullString
+	err := s.db.QueryRow(q, id).Scan(&ap.ID, &ap.PatternID, &ap.Description, &ap.DontCode, &ap.DoCode,
+		&ap.Source, &ap.Category, &createdAt, &deletedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ap.CreatedAt, _ = parseSQLiteTime(createdAt)
+	if deletedAt.Valid {
+		t, _ := parseSQLiteTime(deletedAt.String)
+		ap.DeletedAt = &t
+	}
+	return &ap, nil
+}
+
+// SoftDeleteAntiPattern marks an anti-pattern as deleted.
+func (s *Store) SoftDeleteAntiPattern(id int64) error {
+	const q = `UPDATE anti_patterns SET deleted_at = CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL`
+	_, err := s.db.Exec(q, id)
+	return err
+}
+
+// RestoreAntiPattern clears the deleted_at flag on a soft-deleted anti-pattern.
+func (s *Store) RestoreAntiPattern(id int64) error {
+	const q = `UPDATE anti_patterns SET deleted_at = NULL WHERE id=? AND deleted_at IS NOT NULL`
+	_, err := s.db.Exec(q, id)
+	return err
+}
+
+// GetQualitySuggestions runs server-side analysis queries to identify patterns
+// that may benefit from user attention.
+func (s *Store) GetQualitySuggestions() ([]QualitySuggestion, error) {
+	var suggestions []QualitySuggestion
+
+	// 1. Patterns with empty do_code (no fix guidance).
+	emptyRows, err := s.db.Query(`SELECT id, rule FROM lint_patterns WHERE do_code = '' AND deleted_at IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("empty do_code query: %w", err)
+	}
+	defer emptyRows.Close()
+	for emptyRows.Next() {
+		var id int64
+		var rule string
+		if err := emptyRows.Scan(&id, &rule); err != nil {
+			return nil, err
+		}
+		suggestions = append(suggestions, QualitySuggestion{
+			Type:        "empty_do_code",
+			PatternIDs:  []int64{id},
+			Description: fmt.Sprintf("Pattern %q has no do_code (fix example)", rule),
+			Action:      "update",
+		})
+	}
+	if err := emptyRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 2. Low-frequency patterns (seen only once).
+	lowRows, err := s.db.Query(`SELECT id, rule FROM lint_patterns WHERE frequency = 1 AND deleted_at IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("low frequency query: %w", err)
+	}
+	defer lowRows.Close()
+	for lowRows.Next() {
+		var id int64
+		var rule string
+		if err := lowRows.Scan(&id, &rule); err != nil {
+			return nil, err
+		}
+		suggestions = append(suggestions, QualitySuggestion{
+			Type:        "low_frequency",
+			PatternIDs:  []int64{id},
+			Description: fmt.Sprintf("Pattern %q has been seen only once", rule),
+			Action:      "remove",
+		})
+	}
+	if err := lowRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// 3. Duplicate dont_code patterns.
+	dupRows, err := s.db.Query(`SELECT dont_code, GROUP_CONCAT(id) FROM lint_patterns WHERE deleted_at IS NULL GROUP BY dont_code HAVING COUNT(*) > 1`)
+	if err != nil {
+		return nil, fmt.Errorf("duplicate dont_code query: %w", err)
+	}
+	defer dupRows.Close()
+	for dupRows.Next() {
+		var dontCode, idsStr string
+		if err := dupRows.Scan(&dontCode, &idsStr); err != nil {
+			return nil, err
+		}
+		var ids []int64
+		for _, part := range strings.Split(idsStr, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			var id int64
+			if _, err := fmt.Sscan(part, &id); err == nil {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 1 {
+			suggestions = append(suggestions, QualitySuggestion{
+				Type:        "duplicate_dont_code",
+				PatternIDs:  ids,
+				Description: fmt.Sprintf("Multiple patterns share the same dont_code (%d patterns)", len(ids)),
+				Action:      "merge",
+			})
+		}
+	}
+	if err := dupRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return suggestions, nil
 }

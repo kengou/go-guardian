@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
@@ -16,6 +17,71 @@ const (
 	defaultGoVulnURL = "https://vuln.go.dev"
 	defaultNVDURL    = "https://services.nvd.nist.gov"
 )
+
+// PrefetchStatus tracks the current state of a vulnerability prefetch operation.
+type PrefetchStatus struct {
+	mu          sync.RWMutex
+	Phase       string    `json:"phase"`        // "idle", "go-vuln", "nvd", "done", "error"
+	Source      string    `json:"source"`        // current source being fetched
+	Progress    int       `json:"progress"`      // CVEs processed so far
+	Total       int       `json:"total"`         // total CVEs to process
+	CVEsFound   int       `json:"cves_found"`    // total CVEs discovered
+	CVEsEnriched int      `json:"cves_enriched"` // enriched via NVD
+	LastRefresh time.Time `json:"last_refresh"`  // when the last fetch completed
+	Error       string    `json:"error"`         // last error message, if any
+}
+
+// Snapshot returns a copy of the current status safe for JSON marshalling.
+func (ps *PrefetchStatus) Snapshot() PrefetchStatus {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return PrefetchStatus{
+		Phase:        ps.Phase,
+		Source:       ps.Source,
+		Progress:     ps.Progress,
+		Total:        ps.Total,
+		CVEsFound:    ps.CVEsFound,
+		CVEsEnriched: ps.CVEsEnriched,
+		LastRefresh:  ps.LastRefresh,
+		Error:        ps.Error,
+	}
+}
+
+// SetPhase updates the current fetch phase and source label.
+func (ps *PrefetchStatus) SetPhase(phase, source string) {
+	ps.mu.Lock()
+	ps.Phase = phase
+	ps.Source = source
+	ps.mu.Unlock()
+}
+
+// SetProgress updates the CVE processing progress.
+func (ps *PrefetchStatus) SetProgress(progress, total int) {
+	ps.mu.Lock()
+	ps.Progress = progress
+	ps.Total = total
+	ps.mu.Unlock()
+}
+
+// SetDone marks the prefetch as complete.
+func (ps *PrefetchStatus) SetDone(found, enriched int) {
+	ps.mu.Lock()
+	ps.Phase = "done"
+	ps.Source = ""
+	ps.CVEsFound = found
+	ps.CVEsEnriched = enriched
+	ps.LastRefresh = time.Now()
+	ps.Error = ""
+	ps.mu.Unlock()
+}
+
+// SetError marks the prefetch as failed.
+func (ps *PrefetchStatus) SetError(err string) {
+	ps.mu.Lock()
+	ps.Phase = "error"
+	ps.Error = err
+	ps.mu.Unlock()
+}
 
 // FetchOptions controls behaviour of FetchVulns.
 type FetchOptions struct {
@@ -37,6 +103,8 @@ type FetchOptions struct {
 	// NVDDelay is the pause between NVD API calls to respect rate limits.
 	// Zero uses the default of 650ms.
 	NVDDelay time.Duration
+	// Status receives live progress updates. May be nil.
+	Status *PrefetchStatus
 }
 
 // FetchResult summarises the outcome of FetchVulns.
@@ -99,9 +167,10 @@ type nvdCVE struct {
 // the results in the vuln_cache table.
 //
 // Strategy:
-//  1. GET https://vuln.go.dev/v1/vulns -- one HTTP call, returns all Go advisories.
-//  2. Filter in-memory by the module set from go.mod.
-//  3. If NVDAPIKey is set, enrich each found CVE with full CVSS scores from NVD.
+//  1. GET https://vuln.go.dev/ID/index.json -- list of all advisory IDs.
+//  2. GET https://vuln.go.dev/ID/{id}.json for each -- individual OSV entries.
+//  3. Filter in-memory by the module set from go.mod.
+//  4. If NVDAPIKey is set, enrich each found CVE with full CVSS scores from NVD.
 func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchResult, error) {
 	var result FetchResult
 	out := opts.Out
@@ -113,6 +182,7 @@ func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchR
 			fmt.Fprintf(out, format+"\n", args...)
 		}
 	}
+	status := opts.Status // may be nil
 
 	// -- Build module set ---------------------------------------------------
 	modules := opts.Modules
@@ -136,22 +206,39 @@ func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchR
 	}
 	logf("Fetching Go vulnerability data for %d modules...", len(modules))
 
-	// -- Fetch all Go vulns (one HTTP call) ---------------------------------
+	// -- Fetch matching Go vulns -------------------------------------------
 	goVulnBase := opts.GoVulnURL
 	if goVulnBase == "" {
 		goVulnBase = defaultGoVulnURL
 	}
-	entries, err := fetchAllGoVulns(ctx, goVulnBase)
+	if status != nil {
+		status.SetPhase("go-vuln", "vuln.go.dev")
+	}
+	entries, err := fetchAllGoVulns(ctx, goVulnBase, modSet)
 	if err != nil {
+		if status != nil {
+			status.SetError(err.Error())
+		}
 		return result, fmt.Errorf("fetch go-vuln database: %w", err)
 	}
-	logf("  Fetched %d entries from go-vuln database", len(entries))
+	logf("  Fetched %d matching advisories from go-vuln database", len(entries))
 
 	// -- Filter and store ---------------------------------------------------
 	nvdBase := opts.NVDURL
 	if nvdBase == "" {
 		nvdBase = defaultNVDURL
 	}
+
+	// Count total CVEs for progress tracking.
+	totalCVEs := 0
+	for _, entry := range entries {
+		for _, affected := range entry.Affected {
+			if modSet[affected.Package.Name] {
+				totalCVEs++
+			}
+		}
+	}
+	processedCVEs := 0
 
 	for _, entry := range entries {
 		for _, affected := range entry.Affected {
@@ -184,13 +271,21 @@ func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchR
 				description = description[:500] + "..."
 			}
 
-			if err := store.UpsertVulnCache(module, cveID, severity, affectedVer, fixedVer, description); err != nil {
+			if err := store.UpsertVulnCache(module, cveID, severity, affectedVer, fixedVer, description, "go-vuln"); err != nil {
 				return result, fmt.Errorf("upsert vuln %s/%s: %w", module, cveID, err)
 			}
 			result.CVEsFound++
+			processedCVEs++
+
+			if status != nil {
+				status.SetProgress(processedCVEs, totalCVEs)
+			}
 
 			// -- NVD enrichment -------------------------------------------------
 			if opts.NVDAPIKey != "" && strings.HasPrefix(cveID, "CVE-") {
+				if status != nil {
+					status.SetPhase("nvd", "NVD ("+cveID+")")
+				}
 				score, nvdSeverity, enrichDesc, err := fetchNVDCVSS(ctx, nvdBase, cveID, opts.NVDAPIKey)
 				if err != nil {
 					// Non-fatal: log and continue.
@@ -202,7 +297,7 @@ func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchR
 					if len(enrichedDesc) > 500 {
 						enrichedDesc = enrichedDesc[:500] + "..."
 					}
-					if err := store.UpsertVulnCache(module, cveID, nvdSeverity, affectedVer, fixedVer, enrichedDesc); err != nil {
+					if err := store.UpsertVulnCache(module, cveID, nvdSeverity, affectedVer, fixedVer, enrichedDesc, "nvd"); err != nil {
 						return result, fmt.Errorf("upsert enriched vuln %s/%s: %w", module, cveID, err)
 					}
 					result.CVEsEnriched++
@@ -223,16 +318,71 @@ func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchR
 		}
 	}
 
+	if status != nil {
+		status.SetDone(result.CVEsFound, result.CVEsEnriched)
+	}
 	logf("Done. CVEs found: %d, enriched via NVD: %d", result.CVEsFound, result.CVEsEnriched)
 	return result, nil
 }
 
-// fetchAllGoVulns calls GET /v1/vulns and returns all OSV entries.
-func fetchAllGoVulns(ctx context.Context, baseURL string) ([]osvEntry, error) {
+// moduleIndexEntry represents one entry in the vuln.go.dev /index/modules.json response.
+type moduleIndexEntry struct {
+	Path  string `json:"path"`
+	Vulns []struct {
+		ID       string `json:"id"`
+		Modified string `json:"modified"`
+		Fixed    string `json:"fixed,omitempty"`
+	} `json:"vulns"`
+}
+
+// fetchAllGoVulns fetches Go vulnerability data relevant to the given module set.
+// It uses the two-step API:
+//  1. GET /index/modules.json — module-to-advisory mapping (one HTTP call).
+//  2. GET /ID/{id}.json — full advisory for each matching advisory.
+//
+// This is much more efficient than fetching all advisories, since only advisories
+// affecting the user's modules are downloaded.
+func fetchAllGoVulns(ctx context.Context, baseURL string, modSet map[string]bool) ([]osvEntry, error) {
 	if err := requireHTTPS(baseURL); err != nil {
 		return nil, fmt.Errorf("go-vuln URL: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/vulns", nil)
+
+	// Step 1: fetch the module index.
+	moduleIndex, err := fetchGoVulnModuleIndex(ctx, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: collect advisory IDs that match the user's modules.
+	idSet := make(map[string]bool)
+	for _, m := range moduleIndex {
+		if !modSet[m.Path] {
+			continue
+		}
+		for _, v := range m.Vulns {
+			idSet[v.ID] = true
+		}
+	}
+
+	if len(idSet) == 0 {
+		return nil, nil
+	}
+
+	// Step 3: fetch each matching advisory by ID.
+	entries := make([]osvEntry, 0, len(idSet))
+	for id := range idSet {
+		entry, err := fetchGoVulnEntry(ctx, baseURL, id)
+		if err != nil {
+			continue // skip entries that fail to fetch
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+// fetchGoVulnModuleIndex fetches GET /index/modules.json.
+func fetchGoVulnModuleIndex(ctx context.Context, baseURL string) ([]moduleIndexEntry, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/index/modules.json", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -245,14 +395,39 @@ func fetchAllGoVulns(ctx context.Context, baseURL string) ([]osvEntry, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("go-vuln API returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("go-vuln modules index returned %d", resp.StatusCode)
 	}
 
-	var entries []osvEntry
-	if err := json.NewDecoder(limitedBody(resp.Body)).Decode(&entries); err != nil {
-		return nil, fmt.Errorf("decode go-vuln response: %w", err)
+	var index []moduleIndexEntry
+	if err := json.NewDecoder(limitedBody(resp.Body)).Decode(&index); err != nil {
+		return nil, fmt.Errorf("decode go-vuln modules index: %w", err)
 	}
-	return entries, nil
+	return index, nil
+}
+
+// fetchGoVulnEntry fetches GET /ID/{id}.json and returns a single OSV entry.
+func fetchGoVulnEntry(ctx context.Context, baseURL, id string) (osvEntry, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/ID/"+id+".json", nil)
+	if err != nil {
+		return osvEntry{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := secureHTTPClient.Do(req)
+	if err != nil {
+		return osvEntry{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return osvEntry{}, fmt.Errorf("go-vuln entry %s returned %d", id, resp.StatusCode)
+	}
+
+	var entry osvEntry
+	if err := json.NewDecoder(limitedBody(resp.Body)).Decode(&entry); err != nil {
+		return osvEntry{}, fmt.Errorf("decode go-vuln entry %s: %w", id, err)
+	}
+	return entry, nil
 }
 
 // fetchNVDCVSS retrieves the CVSS base score and severity for a CVE from NVD.
@@ -260,7 +435,7 @@ func fetchNVDCVSS(ctx context.Context, baseURL, cveID, apiKey string) (score flo
 	if err := requireHTTPS(baseURL); err != nil {
 		return 0, "", "", fmt.Errorf("NVD URL: %w", err)
 	}
-	url := fmt.Sprintf("%s/rest/json/cve/2.0/%s", baseURL, cveID)
+	url := fmt.Sprintf("%s/rest/json/cves/2.0?cveId=%s", baseURL, cveID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, "", "", err

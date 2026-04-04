@@ -8,14 +8,13 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // RegisterQueryKnowledge registers the query_knowledge MCP tool on s.
 // The tool surfaces learned lint patterns, anti-patterns, OWASP findings,
 // and session findings relevant to the file and code context provided by the caller.
 // If sessionID is non-empty, session findings for the file are also included.
-func RegisterQueryKnowledge(s *server.MCPServer, store *db.Store, sessionID string) {
+func RegisterQueryKnowledge(s ToolRegistrar, store *db.Store, sessionID string) {
 	tool := mcp.NewTool("query_knowledge",
 		mcp.WithDescription("Return learned Go patterns, anti-patterns, and OWASP findings relevant to the file being written."),
 		mcp.WithString("file_path",

@@ -31,7 +31,7 @@ type renovateFinding struct {
 }
 
 // RegisterAnalyzeRenovateConfig registers the analyze_renovate_config tool on the MCP server.
-func RegisterAnalyzeRenovateConfig(s *server.MCPServer, store *db.Store) {
+func RegisterAnalyzeRenovateConfig(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("analyze_renovate_config",
 		mcp.WithDescription(
 			"Analyze a Renovate JSON configuration against the guardian rule database "+

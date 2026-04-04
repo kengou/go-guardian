@@ -7,12 +7,11 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // RegisterGetSessionFindings registers the get_session_findings MCP tool.
 // sessionID is captured in the closure so agents don't need to pass it.
-func RegisterGetSessionFindings(s *server.MCPServer, store *db.Store, sessionID string) {
+func RegisterGetSessionFindings(s ToolRegistrar, store *db.Store, sessionID string) {
 	tool := mcp.NewTool(
 		"get_session_findings",
 		mcp.WithDescription(

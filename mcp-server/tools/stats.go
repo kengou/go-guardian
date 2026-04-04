@@ -8,11 +8,10 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // RegisterGetPatternStats registers the get_pattern_stats MCP tool with the given server.
-func RegisterGetPatternStats(s *server.MCPServer, store *db.Store) {
+func RegisterGetPatternStats(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
 		"get_pattern_stats",
 		mcp.WithDescription(

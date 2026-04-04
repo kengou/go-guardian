@@ -11,7 +11,7 @@ import (
 )
 
 // RegisterRenovateQueryKnowledge registers the query_renovate_knowledge MCP tool on the server.
-func RegisterRenovateQueryKnowledge(s *server.MCPServer, store *db.Store) {
+func RegisterRenovateQueryKnowledge(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("query_renovate_knowledge",
 		mcp.WithDescription(
 			"Browse the Renovate knowledge base. Filter by category or search "+

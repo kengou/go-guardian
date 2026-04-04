@@ -7,12 +7,11 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // RegisterReportFinding registers the report_finding MCP tool.
 // sessionID is captured in the closure so agents don't need to pass it.
-func RegisterReportFinding(s *server.MCPServer, store *db.Store, sessionID string) {
+func RegisterReportFinding(s ToolRegistrar, store *db.Store, sessionID string) {
 	tool := mcp.NewTool(
 		"report_finding",
 		mcp.WithDescription(

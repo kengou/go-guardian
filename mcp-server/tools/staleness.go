@@ -10,7 +10,6 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // staleThresholds maps scan type to the duration after which the scan is
@@ -48,7 +47,7 @@ func ProjectID(path string) string {
 // RegisterCheckStaleness registers the check_staleness MCP tool with s.
 // The tool accepts a project_path parameter and returns a human-readable
 // staleness report for the project's scan history.
-func RegisterCheckStaleness(s *server.MCPServer, store *db.Store) {
+func RegisterCheckStaleness(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool("check_staleness",
 		mcp.WithDescription("Check whether security/lint scans for a project are up to date."),
 		mcp.WithString("project_path",

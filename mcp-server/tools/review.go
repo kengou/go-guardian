@@ -16,7 +16,7 @@ import (
 // RegisterLearnFromReview registers the learn_from_review MCP tool with the
 // given server. The tool stores review findings as reusable patterns so they
 // surface in future query_knowledge and suggest_fix calls.
-func RegisterLearnFromReview(s *server.MCPServer, store *db.Store) {
+func RegisterLearnFromReview(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
 		"learn_from_review",
 		mcp.WithDescription(

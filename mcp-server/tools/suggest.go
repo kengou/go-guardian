@@ -7,7 +7,6 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 const (
@@ -32,7 +31,7 @@ type suggestMatch struct {
 }
 
 // RegisterSuggestFix registers the suggest_fix MCP tool with the given server.
-func RegisterSuggestFix(s *server.MCPServer, store *db.Store) {
+func RegisterSuggestFix(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
 		"suggest_fix",
 		mcp.WithDescription(

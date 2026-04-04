@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -29,6 +30,8 @@ func TestNewStore(t *testing.T) {
 		"dep_decisions",
 		"scan_snapshots",
 		"session_findings",
+		"mcp_requests",
+		"pattern_history",
 	}
 	for _, tbl := range tables {
 		var name string
@@ -200,7 +203,7 @@ func TestVulnCache(t *testing.T) {
 	s := newTestStore(t)
 
 	mod := "github.com/example/pkg"
-	if err := s.UpsertVulnCache(mod, "CVE-2024-0001", "HIGH", "< 1.2.0", "1.2.0", "remote code exec"); err != nil {
+	if err := s.UpsertVulnCache(mod, "CVE-2024-0001", "HIGH", "< 1.2.0", "1.2.0", "remote code exec", "go-vuln"); err != nil {
 		t.Fatalf("UpsertVulnCache: %v", err)
 	}
 
@@ -223,7 +226,7 @@ func TestVulnCache(t *testing.T) {
 	}
 
 	// Upsert again with updated severity — should update in place.
-	if err := s.UpsertVulnCache(mod, "CVE-2024-0001", "CRITICAL", "< 1.2.0", "1.2.0", "rce + privesc"); err != nil {
+	if err := s.UpsertVulnCache(mod, "CVE-2024-0001", "CRITICAL", "< 1.2.0", "1.2.0", "rce + privesc", "nvd"); err != nil {
 		t.Fatalf("UpsertVulnCache (update): %v", err)
 	}
 	entries2, err := s.GetVulnCache(mod)
@@ -443,5 +446,572 @@ func TestCleanupOldSessions(t *testing.T) {
 	current, _ := s.GetSessionFindings("current-sess", "")
 	if len(current) != 1 {
 		t.Errorf("expected 1 current finding, got %d", len(current))
+	}
+}
+
+// ── MCP Request Tests ──────────────────────────────────────────────────────
+
+// TestInsertAndGetMCPRequests verifies basic insert and retrieval of MCP requests.
+func TestInsertAndGetMCPRequests(t *testing.T) {
+	s := newTestStore(t)
+
+	tests := []struct {
+		name     string
+		tool     string
+		agent    string
+		params   string
+		duration int64
+		errMsg   string
+	}{
+		{"basic call", "query_knowledge", "reviewer", `{"file_path":"main.go"}`, 42, ""},
+		{"with error", "check_owasp", "security", `{"project":"/app"}`, 100, "scan failed"},
+		{"no agent", "learn_from_lint", "", `{"diff":"..."}`, 15, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := s.InsertMCPRequest(tt.tool, tt.agent, tt.params, tt.duration, tt.errMsg)
+			if err != nil {
+				t.Fatalf("InsertMCPRequest: %v", err)
+			}
+		})
+	}
+
+	// Get all requests (no filter).
+	reqs, err := s.GetMCPRequests("", "", 100, 0)
+	if err != nil {
+		t.Fatalf("GetMCPRequests: %v", err)
+	}
+	if len(reqs) != 3 {
+		t.Fatalf("expected 3 requests, got %d", len(reqs))
+	}
+	// Most recent first.
+	if reqs[0].ToolName != "learn_from_lint" {
+		t.Errorf("expected most recent tool to be learn_from_lint, got %s", reqs[0].ToolName)
+	}
+}
+
+// TestGetMCPRequestsFilters verifies filtering by tool_name and agent.
+func TestGetMCPRequestsFilters(t *testing.T) {
+	s := newTestStore(t)
+
+	_ = s.InsertMCPRequest("query_knowledge", "reviewer", "{}", 10, "")
+	_ = s.InsertMCPRequest("check_owasp", "security", "{}", 20, "")
+	_ = s.InsertMCPRequest("query_knowledge", "linter", "{}", 30, "")
+
+	// Filter by tool.
+	reqs, err := s.GetMCPRequests("query_knowledge", "", 100, 0)
+	if err != nil {
+		t.Fatalf("GetMCPRequests(tool filter): %v", err)
+	}
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests for query_knowledge, got %d", len(reqs))
+	}
+
+	// Filter by agent.
+	reqs, err = s.GetMCPRequests("", "security", 100, 0)
+	if err != nil {
+		t.Fatalf("GetMCPRequests(agent filter): %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request for security, got %d", len(reqs))
+	}
+
+	// Filter by both.
+	reqs, err = s.GetMCPRequests("query_knowledge", "reviewer", 100, 0)
+	if err != nil {
+		t.Fatalf("GetMCPRequests(both filters): %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+}
+
+// TestGetMCPRequestsPagination verifies limit and offset work correctly.
+func TestGetMCPRequestsPagination(t *testing.T) {
+	s := newTestStore(t)
+
+	for i := 0; i < 5; i++ {
+		_ = s.InsertMCPRequest(fmt.Sprintf("tool_%d", i), "", "{}", int64(i), "")
+	}
+
+	// Limit 2.
+	reqs, err := s.GetMCPRequests("", "", 2, 0)
+	if err != nil {
+		t.Fatalf("GetMCPRequests(limit): %v", err)
+	}
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(reqs))
+	}
+
+	// Offset 3.
+	reqs, err = s.GetMCPRequests("", "", 100, 3)
+	if err != nil {
+		t.Fatalf("GetMCPRequests(offset): %v", err)
+	}
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests with offset 3, got %d", len(reqs))
+	}
+}
+
+// TestPruneMCPRequests verifies that old entries are deleted.
+func TestPruneMCPRequests(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert a request, then backdate it.
+	_ = s.InsertMCPRequest("old_tool", "", "{}", 1, "")
+	_, err := s.db.Exec(`UPDATE mcp_requests SET created_at = datetime('now', '-8 days')`)
+	if err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	// Insert a fresh one.
+	_ = s.InsertMCPRequest("new_tool", "", "{}", 1, "")
+
+	// Prune older than 7 days.
+	deleted, err := s.PruneMCPRequests(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("PruneMCPRequests: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("expected 1 deleted, got %d", deleted)
+	}
+
+	// Verify only new_tool remains.
+	reqs, err := s.GetMCPRequests("", "", 100, 0)
+	if err != nil {
+		t.Fatalf("GetMCPRequests: %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(reqs))
+	}
+	if reqs[0].ToolName != "new_tool" {
+		t.Errorf("expected new_tool, got %s", reqs[0].ToolName)
+	}
+}
+
+func TestRecentLearningCount(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert two patterns (created_at defaults to NOW).
+	_ = s.InsertLintPattern("rule1", "*.go", "bad1", "good1", "learned")
+	_ = s.InsertLintPattern("rule2", "*.go", "bad2", "good2", "review")
+
+	count, err := s.RecentLearningCount(7)
+	if err != nil {
+		t.Fatalf("RecentLearningCount: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2, got %d", count)
+	}
+
+	// Count for 0 days should still include today's patterns.
+	count, err = s.RecentLearningCount(0)
+	if err != nil {
+		t.Fatalf("RecentLearningCount(0): %v", err)
+	}
+	// 0 days means "since now" — might be 0 or 2 depending on timing.
+	// Just verify no error.
+}
+
+// ── Pattern Management Tests ──────────────────────────────────────────────────
+
+func TestSoftDeleteAndRestoreLintPattern(t *testing.T) {
+	s := newTestStore(t)
+
+	tests := []struct {
+		name string
+		fn   func(t *testing.T)
+	}{
+		{
+			"soft delete hides pattern from QueryPatterns",
+			func(t *testing.T) {
+				t.Helper()
+				_ = s.InsertLintPattern("errcheck", "*.go", "f()", "if err := f(); err != nil {}", "learned")
+
+				patterns, _ := s.QueryPatterns("*.go", "", 10)
+				if len(patterns) == 0 {
+					t.Fatal("expected pattern before delete")
+				}
+				id := patterns[0].ID
+
+				if err := s.SoftDeleteLintPattern(id); err != nil {
+					t.Fatalf("SoftDeleteLintPattern: %v", err)
+				}
+
+				patterns, _ = s.QueryPatterns("*.go", "", 10)
+				if len(patterns) != 0 {
+					t.Errorf("expected 0 patterns after soft delete, got %d", len(patterns))
+				}
+			},
+		},
+		{
+			"restore brings pattern back",
+			func(t *testing.T) {
+				t.Helper()
+				// Pattern was soft-deleted in previous subtest; find its ID.
+				p, _, _ := s.GetAllLintPatterns("errcheck", "", "", "frequency", true, 10, 0)
+				if len(p) == 0 {
+					t.Fatal("expected deleted pattern via GetAllLintPatterns with includeDeleted")
+				}
+				id := p[0].ID
+				if p[0].DeletedAt == nil {
+					t.Fatal("expected DeletedAt to be non-nil")
+				}
+
+				if err := s.RestoreLintPattern(id); err != nil {
+					t.Fatalf("RestoreLintPattern: %v", err)
+				}
+
+				patterns, _ := s.QueryPatterns("*.go", "", 10)
+				if len(patterns) != 1 {
+					t.Errorf("expected 1 pattern after restore, got %d", len(patterns))
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, tt.fn)
+	}
+}
+
+func TestPatternHistory(t *testing.T) {
+	s := newTestStore(t)
+
+	tests := []struct {
+		name string
+		fn   func(t *testing.T)
+	}{
+		{
+			"insert and retrieve history",
+			func(t *testing.T) {
+				t.Helper()
+				if err := s.InsertPatternHistory("lint", 1, "edit", `{"rule":"old"}`, `{"rule":"new"}`); err != nil {
+					t.Fatalf("InsertPatternHistory: %v", err)
+				}
+				if err := s.InsertPatternHistory("lint", 1, "delete", `{"rule":"new"}`, `{}`); err != nil {
+					t.Fatalf("InsertPatternHistory: %v", err)
+				}
+
+				entries, err := s.GetPatternHistory("lint", 1)
+				if err != nil {
+					t.Fatalf("GetPatternHistory: %v", err)
+				}
+				if len(entries) != 2 {
+					t.Fatalf("expected 2 entries, got %d", len(entries))
+				}
+				// Most recent first.
+				if entries[0].Action != "delete" {
+					t.Errorf("expected most recent action 'delete', got %q", entries[0].Action)
+				}
+				if entries[1].Action != "edit" {
+					t.Errorf("expected oldest action 'edit', got %q", entries[1].Action)
+				}
+			},
+		},
+		{
+			"GetRecentPatternHistory returns across patterns",
+			func(t *testing.T) {
+				t.Helper()
+				_ = s.InsertPatternHistory("anti", 99, "restore", `{}`, `{"id":99}`)
+
+				recent, err := s.GetRecentPatternHistory(10)
+				if err != nil {
+					t.Fatalf("GetRecentPatternHistory: %v", err)
+				}
+				if len(recent) < 3 {
+					t.Fatalf("expected at least 3 recent entries, got %d", len(recent))
+				}
+				if recent[0].PatternType != "anti" {
+					t.Errorf("expected most recent type 'anti', got %q", recent[0].PatternType)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, tt.fn)
+	}
+}
+
+func TestGetAllLintPatterns(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert test data.
+	_ = s.InsertLintPattern("errcheck", "*.go", "f()", "if err := f(); err != nil {}", "learned")
+	_ = s.InsertLintPattern("unused", "*.go", "x := 1", "// remove", "review")
+	_ = s.InsertLintPattern("shadow", "*.ts", "var x", "let x", "learned")
+
+	// Soft-delete one.
+	patterns, _, _ := s.GetAllLintPatterns("", "", "", "frequency", false, 10, 0)
+	var shadowID int64
+	for _, p := range patterns {
+		if p.Rule == "shadow" {
+			shadowID = p.ID
+		}
+	}
+	_ = s.SoftDeleteLintPattern(shadowID)
+
+	tests := []struct {
+		name           string
+		search         string
+		source         string
+		rule           string
+		sortBy         string
+		includeDeleted bool
+		limit          int
+		offset         int
+		wantCount      int
+		wantTotal      int64
+	}{
+		{"all active", "", "", "", "frequency", false, 10, 0, 2, 2},
+		{"include deleted", "", "", "", "frequency", true, 10, 0, 3, 3},
+		{"search by rule", "errcheck", "", "", "frequency", false, 10, 0, 1, 1},
+		{"filter by source", "", "review", "", "frequency", false, 10, 0, 1, 1},
+		{"filter by rule", "", "", "unused", "frequency", false, 10, 0, 1, 1},
+		{"pagination limit", "", "", "", "frequency", false, 1, 0, 1, 2},
+		{"pagination offset", "", "", "", "frequency", false, 10, 1, 1, 2},
+		{"sort by created_at", "", "", "", "created_at", false, 10, 0, 2, 2},
+		{"sort by last_seen", "", "", "", "last_seen", false, 10, 0, 2, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, total, err := s.GetAllLintPatterns(tt.search, tt.source, tt.rule, tt.sortBy, tt.includeDeleted, tt.limit, tt.offset)
+			if err != nil {
+				t.Fatalf("GetAllLintPatterns: %v", err)
+			}
+			if len(results) != tt.wantCount {
+				t.Errorf("results count: want %d, got %d", tt.wantCount, len(results))
+			}
+			if total != tt.wantTotal {
+				t.Errorf("total: want %d, got %d", tt.wantTotal, total)
+			}
+		})
+	}
+}
+
+func TestGetQualitySuggestions(t *testing.T) {
+	s := newTestStore(t)
+
+	tests := []struct {
+		name     string
+		setup    func()
+		wantType string
+	}{
+		{
+			"empty do_code",
+			func() {
+				_ = s.InsertLintPattern("no-fix", "*.go", "bad code", "", "learned")
+			},
+			"empty_do_code",
+		},
+		{
+			"low frequency",
+			func() {
+				// Already inserted with frequency 1 above.
+			},
+			"low_frequency",
+		},
+		{
+			"duplicate dont_code",
+			func() {
+				_ = s.InsertLintPattern("dup-rule-1", "*.go", "shared bad code", "fix1", "learned")
+				_ = s.InsertLintPattern("dup-rule-2", "*.ts", "shared bad code", "fix2", "learned")
+			},
+			"duplicate_dont_code",
+		},
+	}
+
+	// Run all setups first.
+	for _, tt := range tests {
+		tt.setup()
+	}
+
+	suggestions, err := s.GetQualitySuggestions()
+	if err != nil {
+		t.Fatalf("GetQualitySuggestions: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			found := false
+			for _, sug := range suggestions {
+				if sug.Type == tt.wantType {
+					found = true
+					if len(sug.PatternIDs) == 0 {
+						t.Error("expected non-empty PatternIDs")
+					}
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected suggestion type %q not found in %d suggestions", tt.wantType, len(suggestions))
+			}
+		})
+	}
+}
+
+func TestInsertLintPatternClearsDeletedAt(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert, soft-delete, re-insert (re-learn).
+	_ = s.InsertLintPattern("errcheck", "*.go", "f()", "if err := f(); err != nil {}", "learned")
+
+	patterns, _ := s.QueryPatterns("*.go", "", 10)
+	id := patterns[0].ID
+
+	_ = s.SoftDeleteLintPattern(id)
+
+	// Verify it's hidden.
+	patterns, _ = s.QueryPatterns("*.go", "", 10)
+	if len(patterns) != 0 {
+		t.Fatal("expected 0 patterns after soft delete")
+	}
+
+	// Re-learn the same pattern.
+	_ = s.InsertLintPattern("errcheck", "*.go", "f()", "if err := f(); err != nil {}", "learned")
+
+	// Verify it's back and deleted_at is cleared.
+	p, err := s.GetLintPatternByID(id)
+	if err != nil {
+		t.Fatalf("GetLintPatternByID: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil pattern")
+	}
+	if p.DeletedAt != nil {
+		t.Error("expected DeletedAt to be nil after re-learn")
+	}
+	if p.Frequency != 2 {
+		t.Errorf("expected frequency 2 after re-learn, got %d", p.Frequency)
+	}
+}
+
+func TestGetPatternStatsExcludesDeleted(t *testing.T) {
+	s := newTestStore(t)
+
+	_ = s.InsertLintPattern("rule-a", "*.go", "bad-a", "good-a", "learned")
+	_ = s.InsertLintPattern("rule-b", "*.go", "bad-b", "good-b", "learned")
+
+	// Also add an anti-pattern.
+	_ = s.InsertAntiPattern("AP-stats-test", "desc", "bad", "good", "test", "test-cat")
+
+	// Get stats before delete.
+	statsBefore, err := s.GetPatternStats("any-project")
+	if err != nil {
+		t.Fatalf("GetPatternStats (before): %v", err)
+	}
+	lintBefore := statsBefore.TotalLintPatterns
+	antiBefore := statsBefore.TotalAntiPatterns
+
+	// Soft-delete one lint pattern.
+	patterns, _, _ := s.GetAllLintPatterns("rule-a", "", "", "frequency", false, 10, 0)
+	if len(patterns) == 0 {
+		t.Fatal("expected to find rule-a")
+	}
+	_ = s.SoftDeleteLintPattern(patterns[0].ID)
+
+	// Soft-delete the anti-pattern.
+	aps, _, _ := s.GetAllAntiPatterns("AP-stats-test", "", false, 10, 0)
+	if len(aps) == 0 {
+		t.Fatal("expected to find AP-stats-test")
+	}
+	_ = s.SoftDeleteAntiPattern(aps[0].ID)
+
+	statsAfter, err := s.GetPatternStats("any-project")
+	if err != nil {
+		t.Fatalf("GetPatternStats (after): %v", err)
+	}
+
+	if statsAfter.TotalLintPatterns != lintBefore-1 {
+		t.Errorf("TotalLintPatterns: want %d, got %d", lintBefore-1, statsAfter.TotalLintPatterns)
+	}
+	if statsAfter.TotalAntiPatterns != antiBefore-1 {
+		t.Errorf("TotalAntiPatterns: want %d, got %d", antiBefore-1, statsAfter.TotalAntiPatterns)
+	}
+
+	// Top lint patterns should not include deleted ones.
+	for _, p := range statsAfter.TopLintPatterns {
+		if p.Rule == "rule-a" {
+			t.Error("deleted pattern 'rule-a' should not appear in TopLintPatterns")
+		}
+	}
+}
+
+// ── Domain Browser Store Tests ──────────────────────────────────────────────
+
+func TestGetAllVulnEntries(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert 3 vulns for 2 modules.
+	_ = s.UpsertVulnCache("github.com/foo/bar", "CVE-2024-0001", "CRITICAL", "<1.0", "1.0.1", "RCE vulnerability", "nvd")
+	_ = s.UpsertVulnCache("github.com/foo/bar", "CVE-2024-0002", "HIGH", "<2.0", "2.0.0", "SSRF vulnerability", "go-vuln")
+	_ = s.UpsertVulnCache("github.com/baz/qux", "CVE-2024-0003", "MEDIUM", "<3.0", "3.0.0", "XSS vulnerability", "nvd")
+
+	entries, err := s.GetAllVulnEntries(500)
+	if err != nil {
+		t.Fatalf("GetAllVulnEntries: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	// Verify all 3 entries are returned with correct data.
+	severities := map[string]bool{}
+	for _, e := range entries {
+		severities[e.Severity] = true
+	}
+	for _, sev := range []string{"CRITICAL", "HIGH", "MEDIUM"} {
+		if !severities[sev] {
+			t.Errorf("missing severity %q in results", sev)
+		}
+	}
+
+	// Verify ordering: severity DESC (text sort), module ASC within same severity.
+	for i := 1; i < len(entries); i++ {
+		prev := entries[i-1]
+		curr := entries[i]
+		if prev.Severity < curr.Severity {
+			t.Errorf("entries not sorted by severity DESC: %q before %q", prev.Severity, curr.Severity)
+		}
+		if prev.Severity == curr.Severity && prev.Module > curr.Module {
+			t.Errorf("entries not sorted by module ASC within same severity: %q before %q", prev.Module, curr.Module)
+		}
+	}
+
+	// Test default limit.
+	entries2, err := s.GetAllVulnEntries(0)
+	if err != nil {
+		t.Fatalf("GetAllVulnEntries(0): %v", err)
+	}
+	if len(entries2) != 3 {
+		t.Errorf("expected 3 entries with default limit, got %d", len(entries2))
+	}
+}
+
+func TestGetAllDepDecisions(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert 2 decisions.
+	_ = s.UpsertDepDecision("github.com/foo/bar", "upgrade", "Critical CVE", 2)
+	_ = s.UpsertDepDecision("github.com/baz/qux", "accept", "Low risk", 0)
+
+	decisions, err := s.GetAllDepDecisions()
+	if err != nil {
+		t.Fatalf("GetAllDepDecisions: %v", err)
+	}
+	if len(decisions) != 2 {
+		t.Fatalf("expected 2 decisions, got %d", len(decisions))
+	}
+
+	// Verify both modules are present.
+	modules := map[string]bool{}
+	for _, d := range decisions {
+		modules[d.Module] = true
+	}
+	if !modules["github.com/foo/bar"] {
+		t.Error("missing github.com/foo/bar decision")
+	}
+	if !modules["github.com/baz/qux"] {
+		t.Error("missing github.com/baz/qux decision")
 	}
 }

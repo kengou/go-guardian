@@ -79,14 +79,14 @@ func TestCheckDepsWithCachedVulns(t *testing.T) {
 		{"CVE-2023-33333", "LOW", "v1.8.2"},
 	}
 	for _, v := range vulns {
-		if err := store.UpsertVulnCache(muxMod, v.cveID, v.severity, "< v1.8.0", v.fixed, "desc"); err != nil {
+		if err := store.UpsertVulnCache(muxMod, v.cveID, v.severity, "< v1.8.0", v.fixed, "desc", "go-vuln"); err != nil {
 			t.Fatalf("UpsertVulnCache(%s): %v", v.cveID, err)
 		}
 	}
 
 	// Seed gin: 1 CVE with a fixed version → CHECK LATEST.
 	ginMod := "github.com/gin-gonic/gin"
-	if err := store.UpsertVulnCache(ginMod, "CVE-2023-44444", "HIGH", "< v1.9.1", "v1.9.1", "path traversal"); err != nil {
+	if err := store.UpsertVulnCache(ginMod, "CVE-2023-44444", "HIGH", "< v1.9.1", "v1.9.1", "path traversal", "go-vuln"); err != nil {
 		t.Fatalf("UpsertVulnCache(gin): %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestCheckDepsClean(t *testing.T) {
 
 	// Insert an explicit vuln cache entry for a different module so the DB is
 	// non-empty, ensuring we are not accidentally matching the wrong module.
-	if err := store.UpsertVulnCache("github.com/other/pkg", "CVE-2024-99999", "HIGH", "all", "", "other vuln"); err != nil {
+	if err := store.UpsertVulnCache("github.com/other/pkg", "CVE-2024-99999", "HIGH", "all", "", "other vuln", "go-vuln"); err != nil {
 		t.Fatalf("UpsertVulnCache(other): %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestCheckDepsAvoidUnfixedCritical(t *testing.T) {
 	store := newTestStore(t)
 
 	mod := "github.com/example/risky"
-	if err := store.UpsertVulnCache(mod, "CVE-2024-00001", "CRITICAL", "all", "", "rce"); err != nil {
+	if err := store.UpsertVulnCache(mod, "CVE-2024-00001", "CRITICAL", "all", "", "rce", "go-vuln"); err != nil {
 		t.Fatalf("UpsertVulnCache: %v", err)
 	}
 

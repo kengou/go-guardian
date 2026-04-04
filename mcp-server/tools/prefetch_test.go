@@ -8,12 +8,6 @@ import (
 	"testing"
 )
 
-// makeGoVulnResponse builds a JSON array of osvEntry for the mock go-vuln server.
-func makeGoVulnResponse(entries []osvEntry) []byte {
-	data, _ := json.Marshal(entries)
-	return data
-}
-
 // makeNVDResponse builds a minimal NVD CVE 2.0 API JSON response.
 func makeNVDResponse(cveID string, baseScore float64, severity string) []byte {
 	resp := map[string]any{
@@ -123,16 +117,53 @@ func testGoVulnEntries() []osvEntry {
 	}
 }
 
-func TestFetchVulns_GoVulnOnly(t *testing.T) {
-	// Mock go-vuln server returning 3 entries (2 match "example/vuln", 1 matches "other/pkg").
-	goVulnSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/vulns" {
-			http.NotFound(w, r)
+// makeGoVulnServer creates a mock vuln.go.dev server that serves:
+// GET /index/modules.json — module-to-advisory index,
+// GET /ID/{id}.json — individual advisory.
+func makeGoVulnServer(entries []osvEntry) *httptest.Server {
+	// Build module index and entry map from the test entries.
+	entryMap := make(map[string]osvEntry, len(entries))
+	moduleVulns := make(map[string][]map[string]string) // module -> [{id, modified}]
+	for _, e := range entries {
+		entryMap[e.ID] = e
+		for _, aff := range e.Affected {
+			moduleVulns[aff.Package.Name] = append(moduleVulns[aff.Package.Name], map[string]string{
+				"id":       e.ID,
+				"modified": "2024-01-01T00:00:00Z",
+			})
+		}
+	}
+
+	// Build the /index/modules.json response.
+	type modEntry struct {
+		Path  string              `json:"path"`
+		Vulns []map[string]string `json:"vulns"`
+	}
+	var modIndex []modEntry
+	for path, vulns := range moduleVulns {
+		modIndex = append(modIndex, modEntry{Path: path, Vulns: vulns})
+	}
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/index/modules.json" {
+			json.NewEncoder(w).Encode(modIndex)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(makeGoVulnResponse(testGoVulnEntries()))
+		// Match /ID/{id}.json
+		for id, entry := range entryMap {
+			if r.URL.Path == "/ID/"+id+".json" {
+				json.NewEncoder(w).Encode(entry)
+				return
+			}
+		}
+		http.NotFound(w, r)
 	}))
+}
+
+func TestFetchVulns_GoVulnOnly(t *testing.T) {
+	// Mock go-vuln server returning 3 entries (2 match "example/vuln", 1 matches "other/pkg").
+	goVulnSrv := makeGoVulnServer(testGoVulnEntries())
 	defer goVulnSrv.Close()
 
 	store := newTestStore(t)
@@ -185,14 +216,7 @@ func TestFetchVulns_GoVulnOnly(t *testing.T) {
 }
 
 func TestFetchVulns_WithNVDEnrichment(t *testing.T) {
-	goVulnSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/vulns" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(makeGoVulnResponse(testGoVulnEntries()))
-	}))
+	goVulnSrv := makeGoVulnServer(testGoVulnEntries())
 	defer goVulnSrv.Close()
 
 	nvdSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,9 +225,18 @@ func TestFetchVulns_WithNVDEnrichment(t *testing.T) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Verify correct NVD 2.0 API path format.
+		if r.URL.Path != "/rest/json/cves/2.0" {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		cveID := r.URL.Query().Get("cveId")
+		if cveID == "" {
+			http.Error(w, "missing cveId param", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		// Return CVSS 8.1/HIGH for all CVEs.
-		w.Write(makeNVDResponse("CVE-2024-11111", 8.1, "HIGH"))
+		w.Write(makeNVDResponse(cveID, 8.1, "HIGH"))
 	}))
 	defer nvdSrv.Close()
 
@@ -244,10 +277,7 @@ func TestFetchVulns_WithNVDEnrichment(t *testing.T) {
 }
 
 func TestFetchVulns_NoMatchingModules(t *testing.T) {
-	goVulnSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(makeGoVulnResponse(testGoVulnEntries()))
-	}))
+	goVulnSrv := makeGoVulnServer(testGoVulnEntries())
 	defer goVulnSrv.Close()
 
 	store := newTestStore(t)
