@@ -176,13 +176,17 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("chmod guardian db: %w", err)
 	}
 
-	// Enable WAL mode and foreign keys for robustness.
+	// Enable WAL mode for concurrent reads, foreign keys, and a generous
+	// busy timeout so writers retry instead of failing immediately.
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("pragma setup: %w", err)
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// WAL mode supports concurrent readers with serialized writers.
+	// 4 connections let tool handlers, audit logging, and the admin UI
+	// operate without blocking each other on read-heavy workloads.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(0)
 
 	if err := runSchema(db); err != nil {
