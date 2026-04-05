@@ -23,15 +23,41 @@ if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
     if [[ ! -x "${MCP_BIN}" ]] || [[ "${SOURCE_BIN}" -nt "${MCP_BIN}" ]]; then
       cp "${SOURCE_BIN}" "${MCP_BIN}"
       chmod +x "${MCP_BIN}"
+      # Copy source checksum alongside binary.
+      if [[ -f "${CLAUDE_PLUGIN_DATA}/.source-checksum" ]]; then
+        cp "${CLAUDE_PLUGIN_DATA}/.source-checksum" "${GUARDIAN_DIR}/.source-checksum"
+      fi
     fi
   fi
 fi
 
-# ── Fallback: build from source if binary still missing ─────────────────────
-if [[ ! -x "${MCP_BIN}" ]] && [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+# ── Rebuild from source if binary missing OR stale after plugin update ──────
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
   SOURCE_DIR="${CLAUDE_PLUGIN_ROOT}/mcp-server"
-  if [[ -d "${SOURCE_DIR}" ]] && command -v go >/dev/null 2>&1; then
-    (cd "${SOURCE_DIR}" && go build -ldflags="-s -w" -o "${MCP_BIN}" .) 2>/dev/null || true
+  NEEDS_BUILD=false
+
+  if [[ ! -x "${MCP_BIN}" ]]; then
+    NEEDS_BUILD=true
+  elif [[ -d "${SOURCE_DIR}" ]] && [[ -x "${MCP_BIN}" ]]; then
+    # Check if source changed since binary was built (e.g. plugin marketplace update).
+    CURRENT=$("${MCP_BIN}" --source-checksum --checksum-dir "${SOURCE_DIR}" 2>/dev/null || true)
+    STORED=$(cat "${GUARDIAN_DIR}/.source-checksum" 2>/dev/null || true)
+    if [[ -n "${CURRENT}" ]] && [[ "${CURRENT}" != "${STORED}" ]]; then
+      NEEDS_BUILD=true
+    fi
+  fi
+
+  if [[ "${NEEDS_BUILD}" == "true" ]] && [[ -d "${SOURCE_DIR}" ]] && command -v go >/dev/null 2>&1; then
+    (cd "${SOURCE_DIR}" && go build -ldflags="-s -w" -o "${MCP_BIN}" .) 2>/dev/null && {
+      # Compute source checksum using the freshly built binary.
+      "${MCP_BIN}" --source-checksum --checksum-dir "${SOURCE_DIR}" \
+        > "${GUARDIAN_DIR}/.source-checksum" 2>/dev/null || true
+      # Update plugin data cache so other projects get the new binary fast.
+      if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+        cp "${MCP_BIN}" "${CLAUDE_PLUGIN_DATA}/go-guardian-mcp" 2>/dev/null || true
+        cp "${GUARDIAN_DIR}/.source-checksum" "${CLAUDE_PLUGIN_DATA}/.source-checksum" 2>/dev/null || true
+      fi
+    } || true
   fi
 fi
 
