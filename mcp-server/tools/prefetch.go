@@ -197,6 +197,9 @@ func FetchVulns(ctx context.Context, store *db.Store, opts FetchOptions) (FetchR
 		}
 	}
 	if len(modules) == 0 {
+		if status != nil {
+			status.SetDone(0, 0)
+		}
 		return result, nil
 	}
 	result.ModulesChecked = len(modules)
