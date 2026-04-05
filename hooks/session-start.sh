@@ -4,18 +4,19 @@
 
 set -euo pipefail
 
-# ── Resolve paths (plugin vs fallback) ───────────────────────────────────────
-if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
-  MCP_BIN="${CLAUDE_PLUGIN_DATA}/go-guardian-mcp"
-  DB_PATH="${CLAUDE_PLUGIN_DATA}/guardian.db"
+# ── Resolve paths (always per-project) ──────────────────────────────────────
+GUARDIAN_DIR="${PWD}/.go-guardian"
+MCP_BIN="${GUARDIAN_DIR}/go-guardian-mcp"
+DB_PATH="${GUARDIAN_DIR}/guardian.db"
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
   SOURCE_DIR="${CLAUDE_PLUGIN_ROOT}/mcp-server"
-  GUARDIAN_DIR="${CLAUDE_PLUGIN_DATA}"
 else
-  GUARDIAN_DIR="${PWD}/.go-guardian"
-  MCP_BIN="${GUARDIAN_DIR}/go-guardian-mcp"
-  DB_PATH="${GUARDIAN_DIR}/guardian.db"
   SOURCE_DIR=""
 fi
+
+# SECURITY: 0700 so the directory is not world-accessible.
+mkdir -p "${GUARDIAN_DIR}"
+chmod 700 "${GUARDIAN_DIR}"
 
 # ── Check ripgrep (required for agent/skill/search discovery) ────────────────
 if ! command -v rg >/dev/null 2>&1; then
@@ -24,28 +25,28 @@ if ! command -v rg >/dev/null 2>&1; then
   echo "  Or set USE_BUILTIN_RIPGREP=0 after installing. Run /doctor to diagnose."
 fi
 
-# ── Build binary on first use or source change (plugin mode only) ────────────
-if [[ -n "${SOURCE_DIR}" ]] && [[ -d "${SOURCE_DIR}" ]]; then
-  CHECKSUM_FILE="${GUARDIAN_DIR}/.source-checksum"
-  CURRENT_CHECKSUM=$(find "${SOURCE_DIR}" -path '*/node_modules' -prune -o -path '*/dist' -prune -o \( -name '*.go' -o -name 'go.sum' \) -print | sort | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
-
-  NEEDS_BUILD=false
-  if [[ ! -x "${MCP_BIN}" ]]; then
-    NEEDS_BUILD=true
-  elif [[ ! -f "${CHECKSUM_FILE}" ]]; then
-    NEEDS_BUILD=true
-  elif [[ "$(cat "${CHECKSUM_FILE}" 2>/dev/null)" != "${CURRENT_CHECKSUM}" ]]; then
-    NEEDS_BUILD=true
-  fi
-
-  if [[ "${NEEDS_BUILD}" == "true" ]]; then
-    if command -v go >/dev/null 2>&1; then
-      mkdir -p "${GUARDIAN_DIR}"
-      (cd "${SOURCE_DIR}" && go build -ldflags="-s -w" -o "${MCP_BIN}" .) 2>/dev/null && {
-        chmod +x "${MCP_BIN}"
-        echo "${CURRENT_CHECKSUM}" > "${CHECKSUM_FILE}"
-      } || true
+# ── Ensure binary exists in per-project .go-guardian/ ───────────────────────
+# Priority: copy from plugin data (fast) → build from source (slow).
+if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+  SOURCE_BIN="${CLAUDE_PLUGIN_DATA}/go-guardian-mcp"
+  if [[ -x "${SOURCE_BIN}" ]]; then
+    if [[ ! -x "${MCP_BIN}" ]] || [[ "${SOURCE_BIN}" -nt "${MCP_BIN}" ]]; then
+      cp "${SOURCE_BIN}" "${MCP_BIN}"
+      chmod +x "${MCP_BIN}"
     fi
+  fi
+fi
+
+# Build from source if binary still missing (first install or plugin data empty).
+if [[ ! -x "${MCP_BIN}" ]] && [[ -n "${SOURCE_DIR}" ]] && [[ -d "${SOURCE_DIR}" ]]; then
+  if command -v go >/dev/null 2>&1; then
+    (cd "${SOURCE_DIR}" && go build -ldflags="-s -w" -o "${MCP_BIN}" .) 2>/dev/null && {
+      chmod +x "${MCP_BIN}"
+      # Also copy to plugin data so future projects get a fast copy.
+      if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
+        cp "${MCP_BIN}" "${CLAUDE_PLUGIN_DATA}/go-guardian-mcp" 2>/dev/null || true
+      fi
+    } || true
   fi
 fi
 
@@ -104,6 +105,25 @@ binds:
               host: vuln.go.dev
 GWEOF
 
+  # Append New Relic MCP target if API key is set (remote Streamable HTTP — no Node.js bridge).
+  if [[ -n "${NEW_RELIC_API_KEY:-}" ]]; then
+    NR_REGION="${NEW_RELIC_REGION:-us}"
+    if [[ "${NR_REGION}" == "eu" ]]; then
+      NR_MCP_URL="https://mcp.eu.newrelic.com/mcp/"
+    else
+      NR_MCP_URL="https://mcp.newrelic.com/mcp/"
+    fi
+    cat >> "${GATEWAY_CONFIG}" <<NREOF
+          - name: newrelic
+            mcp:
+              host: ${NR_MCP_URL}
+            policies:
+              requestHeaderModifier:
+                set:
+                  Api-Key: "\${NEW_RELIC_API_KEY}"
+NREOF
+  fi
+
   # ── Docker config (OpenAPI backends only — go-guardian stays on stdio via .mcp.json) ──
   GATEWAY_DOCKER_CONFIG="${GUARDIAN_DIR}/gateway-docker-config.yaml"
   cat > "${GATEWAY_DOCKER_CONFIG}" <<GWEOF
@@ -150,6 +170,25 @@ binds:
                 file: /openapi/go-vuln.json
               host: vuln.go.dev
 GWEOF
+
+  # Append New Relic MCP target to Docker config too.
+  if [[ -n "${NEW_RELIC_API_KEY:-}" ]]; then
+    NR_REGION="${NEW_RELIC_REGION:-us}"
+    if [[ "${NR_REGION}" == "eu" ]]; then
+      NR_MCP_URL="https://mcp.eu.newrelic.com/mcp/"
+    else
+      NR_MCP_URL="https://mcp.newrelic.com/mcp/"
+    fi
+    cat >> "${GATEWAY_DOCKER_CONFIG}" <<NREOF
+          - name: newrelic
+            mcp:
+              host: ${NR_MCP_URL}
+            policies:
+              requestHeaderModifier:
+                set:
+                  Api-Key: "\${NEW_RELIC_API_KEY}"
+NREOF
+  fi
 
   # ── Auto-start gateway if opted in ────────────────────────────────────────
   GW_MODE="${GO_GUARDIAN_GATEWAY:-}"
@@ -217,9 +256,17 @@ if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
   echo "export GO_GUARDIAN_SESSION_ID=${SESSION_ID}" >> "${CLAUDE_ENV_FILE}"
 fi
 
-# Persist admin port so the admin UI starts in this session.
-if [[ -n "${GO_GUARDIAN_ADMIN_PORT:-}" ]] && [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
-  echo "export GO_GUARDIAN_ADMIN_PORT=${GO_GUARDIAN_ADMIN_PORT}" >> "${CLAUDE_ENV_FILE}"
+# ── Per-project admin port (random, persisted in .go-guardian/) ─────────────
+PORT_FILE="${GUARDIAN_DIR}/admin-port"
+if [[ ! -f "${PORT_FILE}" ]]; then
+  ADMIN_PORT=$(( (RANDOM % 900) + 9100 ))
+  echo "${ADMIN_PORT}" > "${PORT_FILE}"
+fi
+ADMIN_PORT=$(cat "${PORT_FILE}")
+export GO_GUARDIAN_ADMIN_PORT="${ADMIN_PORT}"
+
+if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
+  echo "export GO_GUARDIAN_ADMIN_PORT=${ADMIN_PORT}" >> "${CLAUDE_ENV_FILE}"
 fi
 
 # ── Check for stale scans ───────────────────────────────────────────────────
