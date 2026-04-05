@@ -2,18 +2,13 @@
 # go-guardian: PostToolUse(Bash) hook -- learn from lint output
 # Only spawned for golangci-lint commands (filtered by "if": "Bash(golangci-lint *)" in hooks.json).
 # STDIN receives JSON: {"tool_name":"Bash","tool_input":{"command":"..."},"tool_response":"..."}
-# Dual-mode: works as plugin (CLAUDE_PLUGIN_DATA set) or standalone (.go-guardian/).
+# Per-project: binary and DB in .go-guardian/.
 
 set -euo pipefail
 
-# ── Resolve paths (plugin vs fallback) ───────────────────────────────────────
-if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
-  MCP_BIN="${CLAUDE_PLUGIN_DATA}/go-guardian-mcp"
-  DB_PATH="${CLAUDE_PLUGIN_DATA}/guardian.db"
-else
-  MCP_BIN="${PWD}/.go-guardian/go-guardian-mcp"
-  DB_PATH="${PWD}/.go-guardian/guardian.db"
-fi
+# ── Resolve paths (always per-project) ──────────────────────────────────────
+MCP_BIN="${PWD}/.go-guardian/go-guardian-mcp"
+DB_PATH="${PWD}/.go-guardian/guardian.db"
 
 # Only run if binary exists.
 if [[ ! -x "${MCP_BIN}" ]]; then
