@@ -1,7 +1,7 @@
 ---
 name: go
 description: Central Go development orchestrator. Routes to specialized agents.
-argument-hint: "[scan|review|test|lint|security|deps] [path]"
+argument-hint: "[scan|review|test|lint|security|deps|design|plan|implement|validate] [path|topic]"
 paths: "*.go,go.mod,go.sum"
 tools:
   - mcp__go-guardian__query_knowledge
@@ -29,6 +29,21 @@ Use the `go-guardian:orchestrator` agent definition (loaded in conversation cont
 - test → invoke `/go-test`
 - patterns → invoke `/go-patterns`
 - renovate → invoke `/renovate`
+
+**Routing to beastmode** (feature lifecycle):
+- design → invoke `/beastmode:design <topic>`
+- plan → invoke `/beastmode:plan <epic-name>`
+- implement → invoke `/beastmode:implement <epic-name>-<feature-name>`
+- validate → invoke `/beastmode:validate <epic-name>`
+
+Keywords that trigger beastmode routing:
+- **design**: "design", "new feature", "add feature", "feature request", "PRD", "spec"
+- **plan**: "plan", "break down", "decompose", "task breakdown"
+- **implement**: "implement", "build", "develop", "code this", "create feature"
+- **validate**: "validate", "verify", "release check", "pre-release"
+
+When beastmode intent is detected, pass the remaining arguments as the topic/epic name.
+Example: `/go design a caching layer` → `/beastmode:design a caching layer`
 
 ## Full Scan (no args on existing project)
 
