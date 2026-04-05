@@ -3,12 +3,20 @@ name: renovate
 description: Analyze, validate, and improve Renovate configurations
 argument-hint: "[path|--auto|dry-run|suggest|learn|stats]"
 paths: "renovate.json,.renovaterc,.renovaterc.json"
-agent: go-guardian:advisor
+tools:
+  - mcp__go-guardian__validate_renovate_config
+  - mcp__go-guardian__analyze_renovate_config
+  - mcp__go-guardian__suggest_renovate_rule
+  - mcp__go-guardian__learn_renovate_preference
+  - mcp__go-guardian__query_renovate_knowledge
+  - mcp__go-guardian__get_renovate_stats
 ---
 
 # /renovate
 
 Analyze and improve your Renovate configuration using best practices and learned preferences.
+
+You MUST call the MCP tools below directly. Do NOT delegate to a subagent — MCP tools only work in the main conversation.
 
 ## Usage
 
@@ -22,19 +30,34 @@ Analyze and improve your Renovate configuration using best practices and learned
 /renovate stats                  -> show dashboard
 ```
 
-## Routing
+## Required MCP Tool Calls
 
-Parse the arguments and delegate to the `go-guardian:advisor` agent with context:
+Based on subcommand:
 
-- **No args or path only**: Default analyze workflow
-- **--auto**: Set auto-apply mode, delegate with instruction to auto-apply safe changes
-- **dry-run**: Delegate with instruction to focus on validation with dry-run
-- **suggest <problem>**: Pass problem description to agent for targeted suggestions
-- **learn**: Delegate with instruction to review recent analysis and prompt for feedback
-- **stats**: Delegate with instruction to show dashboard only
+### No args or path only (default analyze):
+1. **query_renovate_knowledge** — get previously learned preferences
+2. **validate_renovate_config** — validate the config for errors
+3. **analyze_renovate_config** — analyze for improvements
+4. **get_renovate_stats** — show dashboard summary
 
-## Context Hints
+### --auto:
+1-4. Same as default, plus:
+5. **suggest_renovate_rule** — generate safe suggestions
+6. **learn_renovate_preference** — learn from any applied changes
 
-- Config path: auto-detected or from first argument
-- RENOVATE_TOKEN: check if set, inform agent if dry-run is available
-- Current directory: pass to agent for repo context
+### suggest \<problem\>:
+1. **query_renovate_knowledge** — check existing knowledge
+2. **suggest_renovate_rule** — generate targeted suggestion
+
+### learn:
+1. **query_renovate_knowledge** — review recent analysis
+2. **learn_renovate_preference** — learn from user feedback
+
+### stats:
+1. **get_renovate_stats** — show full dashboard
+
+### dry-run:
+1. **validate_renovate_config** — validate first
+2. Run `renovate --dry-run` via Bash (needs RENOVATE_TOKEN)
+
+Use the `go-guardian:advisor` agent definition (loaded in conversation context) for Renovate best practices, scoring methodology, and custom datasource guidance.
