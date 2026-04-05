@@ -1,5 +1,5 @@
 ---
-name: go-guardian:advisor
+name: advisor
 description: Self-learning Renovate config advisor — analyzes, suggests, validates, and improves renovate.json configurations using the go-guardian MCP knowledge base
 tools:
   - mcp__go-guardian__validate_renovate_config

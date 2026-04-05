@@ -1,5 +1,5 @@
 ---
-name: go-guardian:security
+name: security
 description: Scans Go projects for OWASP Top 10 vulnerabilities, known CVEs in dependencies, and insecure coding patterns. Trained on security patterns from 37 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Cosign, Sealed-Secrets, OPA, Kyverno, Thanos, OTel Go, Istio, Gardener, Crossplane, Helm, Flux2, Vault, Zitadel, StackRox, ArgoCD, etcd, cert-manager, Calico, Cilium, containerd, Podman.
 tools:
   - mcp__go-guardian__check_owasp

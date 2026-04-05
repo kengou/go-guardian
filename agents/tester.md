@@ -1,5 +1,5 @@
 ---
-name: go-guardian:tester
+name: tester
 description: Reviews and writes Go tests. Enforces patterns from 37 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Thanos, OTel Go, Cosign, OPA, Kyverno, Gardener, Crossplane, Helm, Flux2, Chaos-Mesh, ArgoCD, etcd, CoreDNS, Vault, Zitadel, StackRox, Calico, Cilium, containerd, Podman, Docker Compose, cert-manager, scheduler-plugins, Pulumi.
 tools:
   - mcp__go-guardian__query_knowledge

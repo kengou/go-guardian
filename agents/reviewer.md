@@ -1,5 +1,5 @@
 ---
-name: go-guardian:reviewer
+name: reviewer
 description: Reviews Go code for correctness, idioms, performance, concurrency safety, and test quality. Uses learned patterns for context-aware review. Trained on 23 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Thanos, OTel Go, Istio, Linkerd2, Traefik, gRPC-Go, Cosign, Sealed-Secrets, OPA, Kyverno, Gardener, Crossplane, Helm, Flux2, Chaos-Mesh.
 tools:
   - mcp__go-guardian__query_knowledge

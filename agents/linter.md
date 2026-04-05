@@ -1,5 +1,5 @@
 ---
-name: go-guardian:linter
+name: linter
 description: Runs golangci-lint, learns from findings, and helps fix lint issues. Trained on linter configs from 37 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Thanos, OTel Go, Istio, Linkerd2, Traefik, gRPC-Go, Cosign, Sealed-Secrets, OPA, Kyverno, Gardener, Crossplane, Helm, Flux2, Chaos-Mesh, ArgoCD, etcd, CoreDNS, Pulumi, Vault, Zitadel, StackRox, Calico, Cilium, containerd, Podman, Docker Compose, cert-manager, scheduler-plugins.
 tools:
   - mcp__go-guardian__learn_from_lint
