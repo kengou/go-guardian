@@ -24,7 +24,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const version = "0.2.3"
+const version = "0.2.4"
 
 func main() {
 	dbPath := flag.String("db", ".go-guardian/guardian.db", "path to the SQLite database file")
@@ -39,6 +39,9 @@ func main() {
 	// Runtime toggles for MCP server mode.
 	noAdmin := flag.Bool("no-admin", false, "disable admin UI HTTP server even if GO_GUARDIAN_ADMIN_PORT is set")
 	noPrefetch := flag.Bool("no-prefetch", false, "disable background CVE prefetch on startup")
+	auditLog := flag.Bool("audit-log", false, "enable MCP request audit logging to mcp_requests table (always on when admin UI is active)")
+	debug := flag.Bool("debug", false, "enable debug logging: log every MCP request/response to a file next to the DB")
+	logFile := flag.String("log-file", "", "path to debug log file (defaults to <db-dir>/guardian.log)")
 
 	// CLI one-shot modes: staleness, learn, query-knowledge, healthcheck.
 	healthcheckFlag := flag.Bool("healthcheck", false, "run diagnostic checks on DB schema, seeds, and tool registration, then exit")
@@ -143,6 +146,24 @@ func main() {
 
 	log.Printf("go-guardian MCP server v%s started, db: %s\n", version, *dbPath)
 
+	// ── Debug log file ───────────────────────────────────────────────────
+	// When --debug is set, redirect log output to a file so MCP request
+	// arrivals and tool calls are visible for post-mortem debugging.
+	if *debug {
+		logPath := *logFile
+		if logPath == "" {
+			logPath = filepath.Join(filepath.Dir(*dbPath), "guardian.log")
+		}
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			log.Fatalf("open debug log: %v", err)
+		}
+		defer f.Close()
+		// Write to both stderr (MCP stdio doesn't use stderr) and the file.
+		log.SetOutput(io.MultiWriter(os.Stderr, f))
+		log.Printf("debug logging enabled: %s", logPath)
+	}
+
 	// Shared prefetch status tracker for admin UI progress reporting.
 	prefetchStatus := &tools.PrefetchStatus{}
 
@@ -227,10 +248,24 @@ func main() {
 	// Create the MCP server and register all tools.
 	s := server.NewMCPServer("go-guardian", version)
 
-	// If admin UI is enabled, wrap tool registration to log invocations.
+	// Audit/debug logging: wrap tool registration to log invocations.
+	enableAudit := *auditLog || adminPort != ""
 	var reg tools.ToolRegistrar = s
-	if adminPort != "" {
-		reg = &loggingRegistrar{inner: s, store: store}
+	if enableAudit || *debug {
+		reg = &loggingRegistrar{inner: s, store: store, dbLog: enableAudit, debugLog: *debug}
+		if enableAudit && adminPort == "" {
+			if pruned, err := store.PruneMCPRequests(7 * 24 * time.Hour); err != nil {
+				log.Printf("warning: prune mcp_requests failed: %v", err)
+			} else if pruned > 0 {
+				log.Printf("audit: pruned %d old request log entries", pruned)
+			}
+		}
+		if enableAudit {
+			log.Printf("audit logging: enabled (DB)")
+		}
+		if *debug {
+			log.Printf("debug logging: tool calls will be logged")
+		}
 	}
 
 	tools.RegisterLearnFromLint(reg, store)
@@ -259,15 +294,37 @@ func main() {
 	}
 }
 
-// loggingRegistrar wraps MCP tool registration to log every tool invocation
-// to the mcp_requests table for the admin activity log.
+// loggingRegistrar wraps MCP tool registration to log every tool invocation.
+// When dbLog is true, writes to mcp_requests table. When debugLog is true,
+// logs request arrival and duration to the log output (file/stderr).
 type loggingRegistrar struct {
-	inner *server.MCPServer
-	store *db.Store
+	inner    *server.MCPServer
+	store    *db.Store
+	dbLog    bool
+	debugLog bool
 }
 
 func (l *loggingRegistrar) AddTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
-	l.inner.AddTool(tool, admin.WrapToolHandler(l.store, tool.Name, handler))
+	wrapped := handler
+	if l.dbLog {
+		wrapped = admin.WrapToolHandler(l.store, tool.Name, wrapped)
+	}
+	if l.debugLog {
+		inner := wrapped
+		wrapped = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			start := time.Now()
+			log.Printf("[DEBUG] tool request: %s", tool.Name)
+			result, err := inner(ctx, req)
+			dur := time.Since(start)
+			if err != nil {
+				log.Printf("[DEBUG] tool response: %s err=%v (%s)", tool.Name, err, dur)
+			} else {
+				log.Printf("[DEBUG] tool response: %s ok (%s)", tool.Name, dur)
+			}
+			return result, err
+		}
+	}
+	l.inner.AddTool(tool, wrapped)
 }
 
 // findGoMod walks up from startDir looking for go.mod. Returns the path if

@@ -3,7 +3,7 @@
     "go-guardian": {
       "type": "stdio",
       "command": "${CLAUDE_PLUGIN_DATA}/go-guardian-mcp",
-      "args": ["--db", "${CLAUDE_PLUGIN_DATA}/guardian.db", "--no-prefetch"],
+      "args": ["--db", "${CLAUDE_PLUGIN_DATA}/guardian.db", "--no-prefetch", "--audit-log"],
       "env": {
         "NVD_API_KEY": "",
         "GITHUB_TOKEN": ""
