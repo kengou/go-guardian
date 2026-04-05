@@ -174,6 +174,7 @@ func main() {
 
 	// Shared prefetch status tracker for admin UI progress reporting.
 	prefetchStatus := &tools.PrefetchStatus{}
+	prefetchStatus.SetPhase("idle", "")
 
 	// ── Auto go.mod discovery ─────────────────────────────────────────────
 	// If the default "go.mod" doesn't exist, walk up from the project dir.
@@ -219,6 +220,7 @@ func main() {
 	// check_deps have data. Runs once on startup and then daily.
 	runPrefetch := func() {
 		if _, err := os.Stat(goMod); err != nil {
+			prefetchStatus.SetDone(0, 0)
 			return
 		}
 		log.Printf("background prefetch: starting for %s", goMod)
