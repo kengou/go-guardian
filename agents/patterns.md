@@ -1,5 +1,5 @@
 ---
-name: go-guardian:patterns
+name: patterns
 description: Detects Go anti-patterns and suggests idiomatic fixes. Trained on patterns from 37 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Thanos, OTel Go, Istio, Linkerd2, Traefik, gRPC-Go, Cosign, Sealed-Secrets, OPA, Kyverno, Gardener, Crossplane, Helm, Flux2, Chaos-Mesh, ArgoCD, etcd, CoreDNS, Pulumi, Vault, Zitadel, StackRox, Calico, Cilium, containerd, Podman, Docker Compose, cert-manager, scheduler-plugins.
 tools:
   - mcp__go-guardian__query_knowledge
