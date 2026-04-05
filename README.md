@@ -21,6 +21,7 @@ Every lint finding that gets fixed becomes a DON'T/DO pattern. Those patterns ar
 11. [Development](#development)
 12. [E2E testing](#e2e-testing)
 13. [Troubleshooting](#troubleshooting)
+14. [Documentation](#documentation)
 
 ---
 
@@ -47,16 +48,32 @@ Every lint finding that gets fixed becomes a DON'T/DO pattern. Those patterns ar
 
 ```
 Claude Code
-├── Skills: /go  /go-review  /go-security  /go-lint  /go-test  /go-patterns  /go-doctor  /renovate  /newrelic
-├── Agents: orchestrator  reviewer  security  linter  tester  patterns  advisor  newrelic
-└── Hooks:  session-start  post-bash  pre-write-go  pre-edit-go  on-gomod-change  on-task-completed
+├── Skills (call MCP tools directly + delegate deep analysis)
+│   ├── /go              → orchestrator (routes all intents)
+│   ├── /go-review       → MCP tools + /team-review security,performance,architecture
+│   ├── /go-security     → MCP tools + /team-spawn security (4 parallel reviewers)
+│   ├── /go-lint         → MCP tools (learn_from_lint, query_knowledge)
+│   ├── /go-test         → MCP tools + /team-review testing
+│   ├── /go-patterns     → MCP tools + /team-review architecture
+│   ├── /go-doctor       → healthcheck diagnostics
+│   ├── /renovate        → MCP tools (6 renovate tools)
+│   └── /newrelic        → New Relic observability
+├── Agents (context providers — 8 specialists)
+│   orchestrator  reviewer  security  linter  tester  patterns  advisor  newrelic
+├── Hooks (event-driven learning + prevention)
+│   session-start  post-bash  pre-write-go  pre-edit-go  on-gomod-change  on-task-completed
+└── External Plugins (deep analysis layer)
+    ├── agent-teams      → parallel multi-reviewer code analysis
+    ├── beastmode        → design → plan → implement → validate lifecycle
+    ├── code-documentation + documentation-generation → docs/explain/diagram/adr/api-docs
+    └── security-scanning → threat modeling, compliance, SAST
                     │
-                    │ MCP (stdio)
+                    │ MCP (stdio, JSON-RPC 2.0)
                     ▼
-           go-guardian-mcp  (Go binary, 17 tools)
+           go-guardian-mcp  (Go binary, 17 tools, zero CGO)
                     │
                     ▼
-              SQLite  guardian.db
+              SQLite WAL  guardian.db  (11 tables, seeded from 37 projects)
                     │
                     │ (optional)
                     ▼
@@ -65,13 +82,17 @@ Claude Code
               └── New Relic MCP  (stdio → mcp-remote → Streamable HTTP)
 ```
 
-**MCP server** — Go binary using `mcp-go` and pure-Go SQLite (`modernc.org/sqlite`). No CGo. Communicates over stdio.
+**Two-layer analysis**: Skills run MCP tools first (fast, cached pattern/CVE scanning), then delegate deep manual source code analysis to agent-teams reviewers. This ensures every scan gets both pattern-matched findings and human-quality code review.
 
-**Agents** — Markdown definitions loaded by Claude Code for specialized tasks.
+**MCP server** — Go binary using `mcp-go` v0.47.0 and pure-Go SQLite (`modernc.org/sqlite` v1.48.1). No CGo. Communicates over stdio. Skills declare MCP tools in their `tools:` frontmatter for direct invocation.
 
-**Skills** — Slash commands that route to agents and MCP tools.
+**Agents** — 8 markdown definitions loaded into every Claude Code API request as context. They provide domain knowledge but do NOT call MCP tools directly.
+
+**Skills** — 9 slash commands that run in the main conversation and CAN call MCP tools directly. Each skill's `tools:` frontmatter declares which MCP tools it uses.
 
 **Hooks** — Shell scripts that fire on Claude Code events. Prevention injection + learning loop.
+
+For detailed architecture documentation with Mermaid diagrams, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -156,11 +177,13 @@ go-guardian is the Go domain layer. It works best alongside a small stack of com
 ### Layer overview
 
 ```
-Token savings →  rtk              60-90% token savings on Bash commands (transparent hook)
-Lifecycle     →  beastmode        plan → implement → validate → release
-Parallelism   →  agent-teams      parallel code review, parallel debugging
-Security+     →  security-scanning  threat modeling, compliance, SAST setup
-Go domain     →  go-guardian      MCP learning, OWASP/CVE, learned patterns, Renovate config
+Token savings →  rtk                      60-90% token savings on Bash commands (transparent hook)
+Lifecycle     →  beastmode                design → plan → implement → validate (routed from /go)
+Parallelism   →  agent-teams              parallel code review, parallel debugging
+Security+     →  security-scanning        threat modeling, compliance, SAST setup
+Documentation →  code-documentation       code explanations, ADRs
+              +  documentation-generation  architecture docs, API docs, tutorials, changelogs
+Go domain     →  go-guardian              MCP learning, OWASP/CVE, learned patterns, Renovate config
 ```
 
 ### rtk (Rust Token Killer)
@@ -217,6 +240,19 @@ claude plugin install security-scanning@claude-code-workflows
 
 **When to use:** When you need more than code-level OWASP scanning. go-guardian:security automatically escalates to `security-auditor` when it detects requests for threat modeling, compliance, or authentication architecture.
 
+### code-documentation + documentation-generation (wshobson/agents)
+
+**What they add:** Documentation generation routed from `/go docs`, `/go explain`, `/go diagram`, `/go adr`, `/go api-docs`, `/go changelog`. code-documentation handles code explanations and ADRs. documentation-generation handles architecture docs, API docs, Mermaid diagrams, tutorials, and changelogs.
+
+**Install:**
+```bash
+# Same marketplace as agent-teams (already added above)
+claude plugin install code-documentation@claude-code-workflows
+claude plugin install documentation-generation@claude-code-workflows
+```
+
+**When to use:** Invoked automatically when you use `/go docs`, `/go explain`, etc.
+
 ### Summary: what to install
 
 | Plugin | Required | Install command |
@@ -226,72 +262,93 @@ claude plugin install security-scanning@claude-code-workflows
 | beastmode | Recommended | `claude plugin marketplace add BugRoger/beastmode` then `claude plugin install beastmode@beastmode-marketplace` |
 | agent-teams | Recommended | `claude plugin marketplace add wshobson/agents` then `claude plugin install agent-teams@claude-code-workflows` |
 | security-scanning | Optional | `claude plugin install security-scanning@claude-code-workflows` (same marketplace as agent-teams) |
+| code-documentation | Optional | `claude plugin install code-documentation@claude-code-workflows` (same marketplace) |
+| documentation-generation | Optional | `claude plugin install documentation-generation@claude-code-workflows` (same marketplace) |
 
 ---
 
 ## Integrating everything together
 
-Each tool occupies a distinct layer. The key rule: **go-guardian agents always handle Go-specific work first** because only they can call the MCP tools (`mcp__go-guardian__*`). Other plugins extend them, never replace them.
+Each tool occupies a distinct layer. The key rule: **go-guardian skills call MCP tools directly** (via `tools:` frontmatter), then delegate deep manual analysis to agent-teams. Other plugins extend, never replace.
 
 ### How the layers interact
 
 ```
-You type: /go review this PR
+You type: /go review
     │
     ▼
-go-guardian:orchestrator classifies intent → "review"
+/go skill classifies intent → "review" → invokes /go-review
     │
     ▼
-go-guardian:reviewer
-    ├── calls query_knowledge (MCP) → loads learned patterns
-    ├── assesses PR size
-    │     ├── Small PR (≤10 files, ≤500 lines) → runs 6-phase review alone
-    │     └── Large PR → spawns team-reviewer agents in parallel
-    │           ├── team-reviewer: Performance dimension
-    │           ├── team-reviewer: Architecture dimension
-    │           └── go-guardian:reviewer: Go patterns + synthesis
-    └── security issues → defers to go-guardian:security
+/go-review skill (runs in main conversation)
+    ├── Step 1: MCP tools (fast, cached)
+    │     ├── query_knowledge → loads learned patterns for changed files
+    │     ├── suggest_fix → checks for known fix patterns
+    │     └── get_pattern_stats → learning dashboard
+    ├── Step 2: Deep analysis (agent-teams)
+    │     └── /team-review . --reviewers security,performance,architecture
+    │           ├── security-reviewer
+    │           ├── performance-reviewer
+    │           └── architecture-reviewer
+    └── Step 3: Merged report + learn_from_review for accepted fixes
 ```
 
 ```
-You type: /go check for vulns
+You type: /go security
     │
     ▼
-go-guardian:security
-    ├── calls check_deps (MCP) → CVE scan from local cache
-    ├── runs govulncheck
-    ├── calls check_owasp (MCP) → A01-A10 pattern scan
-    └── if request involves threat modeling / compliance
-          └── escalates to security-auditor (security-scanning plugin)
+/go-security skill (runs in main conversation)
+    ├── Step 1: MCP tools (fast, cached)
+    │     ├── check_owasp → A01-A10 pattern scan
+    │     ├── check_deps → CVE scan from local cache
+    │     ├── check_staleness → scan freshness
+    │     └── govulncheck (bash) → Go vulnerability database
+    ├── Step 2: Deep analysis (agent-teams)
+    │     └── /team-spawn security (4 parallel reviewers)
+    │           ├── OWASP & Known Vulns reviewer
+    │           ├── Auth & Access Control reviewer
+    │           ├── Dependencies reviewer
+    │           └── Secrets & Config reviewer
+    └── Step 3: Consolidated report with severity rankings
+```
+
+```
+You type: /go design add OAuth2 login
+    │
+    ▼
+/go skill classifies intent → "design" → invokes /beastmode:design
+    │
+    ▼
+beastmode lifecycle (all routed from /go):
+    /go design <topic>   → /beastmode:design   → PRD via decision tree interview
+    /go plan <epic>       → /beastmode:plan     → feature decomposition
+    /go implement <feat>  → /beastmode:implement → subagent task dispatch
+    /go validate <epic>   → /beastmode:validate  → quality gates
+```
+
+```
+You type: /go docs
+    │
+    ▼
+/go skill classifies intent → "docs" → documentation plugins
+    docs (basic)    → /doc-generate
+    docs (full)     → docs-architect + mermaid-expert + reference-builder
+    explain         → /code-explain
+    diagram         → mermaid-expert agent
+    adr             → /architecture-decision-records
+    api-docs        → /openapi-spec-generation
+    changelog       → /changelog-automation
 ```
 
 ```
 You type: /renovate
     │
     ▼
-go-guardian:advisor
+/renovate skill (runs in main conversation)
     ├── detects config (renovate.json / .renovaterc / .renovaterc.json)
     ├── calls analyze_renovate_config (MCP) → scores config
     ├── calls suggest_renovate_rule (MCP) → improvement suggestions
     └── calls learn_renovate_preference (MCP) → remembers accepted/rejected suggestions
-```
-
-```
-You type: /plan add OAuth2 login
-    │
-    ▼
-beastmode:plan → writes implementation plan
-    │
-    ▼
-/implement → executes plan via subagents
-    │
-    ▼
-/validate → runs tests, quality gates
-    │
-    ▼
-(during implementation)
-pre-write-go hook → calls query_knowledge → injects learned patterns
-post-bash hook → detects golangci-lint run → calls learn_from_lint
 ```
 
 ### Settings integration
@@ -321,7 +378,10 @@ On session start, the hook automatically:
 /go
 ```
 
-Runs everything in sequence: staleness check → dep CVEs → golangci-lint + learn → go vet → OWASP scan → race tests → pattern stats report → health trends.
+Runs in 3 phases:
+1. **MCP + automated tools**: golangci-lint, go vet, go test -race, govulncheck, check_owasp, check_deps
+2. **Deep analysis**: `/team-spawn security` (4 reviewers) + `/team-review --reviewers performance,architecture,testing`
+3. **Consolidated report** with trend data and learning stats
 
 ### Code review
 
@@ -383,15 +443,30 @@ Scans for known anti-patterns across all categories (AP, CONC, ERR, TEST, OP, GI
 
 Requires the New Relic MCP server (via agentgateway bridge or direct connection). See [AgentGateway](#agentgateway) for setup.
 
-### Feature work
+### Feature work (via /go)
 
 ```
-/plan add rate limiting to the API
-/implement
-/validate
+/go design add rate limiting to the API    # PRD via decision tree interview
+/go plan rate-limiting                      # Decompose PRD into features
+/go implement rate-limiting-middleware      # Build with task orchestration
+/go validate rate-limiting                  # Quality gates before release
 ```
 
-beastmode handles the lifecycle. go-guardian hooks fire automatically during implementation to inject patterns and learn from fixes.
+Routes to beastmode lifecycle. go-guardian hooks fire automatically during implementation to inject patterns and learn from fixes.
+
+### Documentation
+
+```
+/go docs                                    # Basic docs (doc-generate)
+/go docs --full                             # Full docs (architect + mermaid + reference)
+/go explain handler.go                      # Explain code
+/go diagram                                 # Architecture diagram (Mermaid)
+/go adr                                     # Architecture Decision Record
+/go api-docs                                # OpenAPI spec generation
+/go changelog                               # Changelog automation
+```
+
+Routes to code-documentation and documentation-generation plugins.
 
 ### When go.mod changes (auto-refresh)
 
@@ -400,6 +475,8 @@ The `post-bash` hook detects `go get`, `go mod tidy`, or `go mod download` comma
 ---
 
 ## MCP Tools
+
+For detailed parameter tables, return values, and caller information, see [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md).
 
 ### Go Guardian tools (11)
 
@@ -643,6 +720,9 @@ go-guardian/
 │       ├── entrypoint.sh        #     Container test runner (assertions + timeouts)
 │       └── fixture/             #     Minimal Go project with intentional issues
 ├── docs/
+│   ├── ARCHITECTURE.md          #   System architecture with Mermaid diagrams
+│   ├── MCP-TOOLS.md             #   Complete MCP tool reference (17 tools)
+│   ├── QUICKSTART.md            #   Quick start guide
 │   └── cve-fetching.md          #   CVE fetch strategy, HTTP budget, CWE mapping
 ├── golangci-lint.template.yml   #   Recommended linter config
 ├── settings-template.json       #   Claude Code settings template (standalone mode)
@@ -797,6 +877,17 @@ go-guardian agents work as both subagents and agent-team teammates. If using age
 - Teammates load CLAUDE.md, MCP servers, and skills automatically — go-guardian agents will work
 - The `TaskCompleted` hook enforces `go build` and `go vet` gates before tasks can be marked complete
 - Avoid two teammates editing the same Go file — break work by file ownership
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Quick Start Guide](docs/QUICKSTART.md) | Installation, basic usage, common workflows |
+| [Architecture](docs/ARCHITECTURE.md) | System architecture, component overview, data model, learning loop (with Mermaid diagrams) |
+| [MCP Tool Reference](docs/MCP-TOOLS.md) | All 17 MCP tools with parameters, return values, and caller info |
+| [CVE Fetching](docs/cve-fetching.md) | CVE fetch strategy, HTTP budget, CWE-to-OWASP mapping |
 
 ---
 
