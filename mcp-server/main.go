@@ -24,7 +24,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const version = "0.2.2"
+const version = "0.2.3"
 
 func main() {
 	dbPath := flag.String("db", ".go-guardian/guardian.db", "path to the SQLite database file")
@@ -35,6 +35,10 @@ func main() {
 	githubToken := flag.String("github-token", os.Getenv("GITHUB_TOKEN"), "GitHub token for GHSA API (optional, increases rate limits)")
 	goModPath := flag.String("go-mod", "go.mod", "path to go.mod for --prefetch mode")
 	projectDir := flag.String("project", "", "project root for scan path validation (defaults to directory of --db)")
+
+	// Runtime toggles for MCP server mode.
+	noAdmin := flag.Bool("no-admin", false, "disable admin UI HTTP server even if GO_GUARDIAN_ADMIN_PORT is set")
+	noPrefetch := flag.Bool("no-prefetch", false, "disable background CVE prefetch on startup")
 
 	// CLI one-shot modes: staleness, learn, query-knowledge, healthcheck.
 	healthcheckFlag := flag.Bool("healthcheck", false, "run diagnostic checks on DB schema, seeds, and tool registration, then exit")
@@ -154,6 +158,9 @@ func main() {
 
 	// ── Admin UI: start HTTP server if GO_GUARDIAN_ADMIN_PORT is set ──────
 	adminPort := os.Getenv("GO_GUARDIAN_ADMIN_PORT")
+	if *noAdmin {
+		adminPort = ""
+	}
 	if adminPort != "" {
 		// Prune old MCP request log entries (>7 days).
 		if pruned, err := store.PruneMCPRequests(7 * 24 * time.Hour); err != nil {
@@ -202,18 +209,20 @@ func main() {
 			result.ModulesChecked, result.CVEsFound, result.CVEsEnriched)
 	}
 
-	// Run initial prefetch in background.
-	go runPrefetch()
+	// Run initial prefetch in background (unless --no-prefetch).
+	if !*noPrefetch {
+		go runPrefetch()
 
-	// Daily refresh ticker.
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			log.Printf("daily CVE refresh: starting")
-			runPrefetch()
-		}
-	}()
+		// Daily refresh ticker.
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				log.Printf("daily CVE refresh: starting")
+				runPrefetch()
+			}
+		}()
+	}
 
 	// Create the MCP server and register all tools.
 	s := server.NewMCPServer("go-guardian", version)
