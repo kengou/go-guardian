@@ -19,7 +19,8 @@ Every lint finding that gets fixed becomes a DON'T/DO pattern. Those patterns ar
 9. [AgentGateway (optional)](#agentgateway)
 10. [Project layout](#project-layout)
 11. [Development](#development)
-12. [Troubleshooting](#troubleshooting)
+12. [E2E testing](#e2e-testing)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -635,6 +636,12 @@ go-guardian/
 │       ├── bridge.mjs           #     Entry point (env → mcp-remote args)
 │       ├── package.json         #     mcp-remote dependency
 │       └── Makefile             #     docker-build / docker-push-multi
+├── test/
+│   └── e2e/                     #   End-to-end clean-room testing
+│       ├── Dockerfile           #     Ubuntu 24.04 + Go + Claude Code + debug tools
+│       ├── run.sh               #     Host-side orchestrator (single entry point)
+│       ├── entrypoint.sh        #     Container test runner (assertions + timeouts)
+│       └── fixture/             #     Minimal Go project with intentional issues
 ├── docs/
 │   └── cve-fetching.md          #   CVE fetch strategy, HTTP budget, CWE mapping
 ├── golangci-lint.template.yml   #   Recommended linter config
@@ -669,6 +676,83 @@ cp go-guardian/golangci-lint.template.yml .golangci.yml
 ### Add seed patterns
 
 SQL seed files live in `mcp-server/db/seed/`. They are loaded on first database initialization. Follow the existing INSERT format and rebuild.
+
+---
+
+## E2E Testing
+
+Docker-based clean-room testing framework. Spins up a fresh Ubuntu 24.04 container, installs Claude Code + go-guardian as a plugin, and runs a full scan against a test fixture with known issues. Use this to verify releases before tagging or reproduce environment-specific bugs.
+
+### Prerequisites
+
+- Docker
+- An Anthropic API key (free tier works)
+
+### Quick start
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... ./test/e2e/run.sh
+```
+
+That's it. The script builds the Docker image, installs go-guardian, and runs all tests.
+
+### Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | *(required)* | Anthropic API key for Claude Code |
+| `GO_GUARDIAN_VERSION` | latest release tag | Version tag or branch to test (e.g. `v0.2.1`, `main`) |
+
+```bash
+# Test a specific version
+ANTHROPIC_API_KEY=sk-ant-... GO_GUARDIAN_VERSION=v0.2.1 ./test/e2e/run.sh
+
+# Test the main branch
+ANTHROPIC_API_KEY=sk-ant-... GO_GUARDIAN_VERSION=main ./test/e2e/run.sh
+```
+
+### Debug mode
+
+When a test fails, use `--debug` to keep the container alive for interactive investigation:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... ./test/e2e/run.sh --debug
+
+# In another terminal:
+docker exec -it go-guardian-e2e bash
+
+# Inside the container — all debug tools are available:
+sqlite3 ~/.claude/*/guardian.db '.tables'
+strace -p $(pgrep go-guardian-mcp)
+cat /tmp/e2e-scan-output.txt
+
+# When done:
+docker rm -f go-guardian-e2e
+```
+
+### What it tests
+
+| Test | Timeout | What it checks |
+|---|---|---|
+| MCP healthcheck | 30s | Binary runs, schema OK, seeds present, tools registered |
+| Full `/go` scan | 5 min | Claude Code + go-guardian run a full scan on the test fixture |
+| Admin UI | 10s | `/api/v1/vulns` and `/api/v1/patterns` return HTTP 200 + valid JSON |
+| Database integrity | — | `vuln_cache`, `scan_history`, `anti_patterns` tables have data |
+
+Overall timeout: 15 minutes. Each step reports `[PASS]`, `[FAIL]`, or `[TIMEOUT]`.
+
+### Test fixture
+
+The fixture at `test/e2e/fixture/` is a minimal Go project with intentional issues:
+
+- **CVE**: `golang.org/x/text v0.3.6` — CVE-2021-38561 (out-of-bounds read)
+- **OWASP A03**: SQL injection via `fmt.Sprintf("SELECT ... %s", userInput)`
+- **Lint violations**: unchecked error return, unused variable assignment
+- **Renovate config**: basic `renovate.json` for advisor tools
+
+### Container contents
+
+Ubuntu 24.04 with: Go, Node.js, Claude Code, git, curl, jq, ripgrep, sqlite3, strace, ltrace, htop, vim.
 
 ---
 
