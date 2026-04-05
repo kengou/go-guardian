@@ -26,25 +26,45 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 # ── Ensure binary exists in per-project .go-guardian/ ───────────────────────
-# Priority: copy from plugin data (fast) → build from source (slow).
+# Priority: copy from plugin data (fast) → build from source (slow) → rebuild if stale.
 if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
   SOURCE_BIN="${CLAUDE_PLUGIN_DATA}/go-guardian-mcp"
   if [[ -x "${SOURCE_BIN}" ]]; then
     if [[ ! -x "${MCP_BIN}" ]] || [[ "${SOURCE_BIN}" -nt "${MCP_BIN}" ]]; then
       cp "${SOURCE_BIN}" "${MCP_BIN}"
       chmod +x "${MCP_BIN}"
+      # Copy source checksum alongside binary.
+      if [[ -f "${CLAUDE_PLUGIN_DATA}/.source-checksum" ]]; then
+        cp "${CLAUDE_PLUGIN_DATA}/.source-checksum" "${GUARDIAN_DIR}/.source-checksum"
+      fi
     fi
   fi
 fi
 
-# Build from source if binary still missing (first install or plugin data empty).
-if [[ ! -x "${MCP_BIN}" ]] && [[ -n "${SOURCE_DIR}" ]] && [[ -d "${SOURCE_DIR}" ]]; then
+# Rebuild from source if binary missing OR stale after plugin marketplace update.
+NEEDS_BUILD=false
+if [[ ! -x "${MCP_BIN}" ]]; then
+  NEEDS_BUILD=true
+elif [[ -n "${SOURCE_DIR}" ]] && [[ -d "${SOURCE_DIR}" ]] && [[ -x "${MCP_BIN}" ]]; then
+  # Check if source changed since binary was built.
+  CURRENT=$("${MCP_BIN}" --source-checksum --checksum-dir "${SOURCE_DIR}" 2>/dev/null || true)
+  STORED=$(cat "${GUARDIAN_DIR}/.source-checksum" 2>/dev/null || true)
+  if [[ -n "${CURRENT}" ]] && [[ "${CURRENT}" != "${STORED}" ]]; then
+    NEEDS_BUILD=true
+  fi
+fi
+
+if [[ "${NEEDS_BUILD}" == "true" ]] && [[ -n "${SOURCE_DIR}" ]] && [[ -d "${SOURCE_DIR}" ]]; then
   if command -v go >/dev/null 2>&1; then
     (cd "${SOURCE_DIR}" && go build -ldflags="-s -w" -o "${MCP_BIN}" .) 2>/dev/null && {
       chmod +x "${MCP_BIN}"
+      # Compute source checksum using the freshly built binary.
+      "${MCP_BIN}" --source-checksum --checksum-dir "${SOURCE_DIR}" \
+        > "${GUARDIAN_DIR}/.source-checksum" 2>/dev/null || true
       # Also copy to plugin data so future projects get a fast copy.
       if [[ -n "${CLAUDE_PLUGIN_DATA:-}" ]]; then
         cp "${MCP_BIN}" "${CLAUDE_PLUGIN_DATA}/go-guardian-mcp" 2>/dev/null || true
+        cp "${GUARDIAN_DIR}/.source-checksum" "${CLAUDE_PLUGIN_DATA}/.source-checksum" 2>/dev/null || true
       fi
     } || true
   fi

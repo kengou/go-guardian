@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -51,6 +53,8 @@ func main() {
 	diffPath := flag.String("diff", "", "path to file containing unified diff (used with --learn)")
 	queryKnowledgeFlag := flag.Bool("query-knowledge", false, "query knowledge base for patterns relevant to a file, then exit")
 	filePath := flag.String("file-path", "", "file path for --query-knowledge mode")
+	sourceChecksumFlag := flag.Bool("source-checksum", false, "compute source checksum for a directory and print it, then exit")
+	checksumDir := flag.String("checksum-dir", "", "directory to compute source checksum for (used with --source-checksum)")
 
 	flag.Parse()
 
@@ -68,6 +72,22 @@ func main() {
 
 	if *showVersion {
 		fmt.Printf("go-guardian-mcp v%s\n", version)
+		os.Exit(0)
+	}
+
+	// ── --source-checksum: compute and print source checksum ───────────────
+	if *sourceChecksumFlag {
+		dir := *checksumDir
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, "error: --checksum-dir is required with --source-checksum")
+			os.Exit(1)
+		}
+		checksum, err := computeSourceChecksum(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(checksum)
 		os.Exit(0)
 	}
 
@@ -922,8 +942,29 @@ func runHealthcheck(dbPath string) int {
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(filepath.Dir(dbPath), ".source-checksum")); err == nil {
-		pass("build_cache", "source checksum present — binary is up to date")
+	checksumPath := filepath.Join(filepath.Dir(dbPath), ".source-checksum")
+	if storedChecksum, err := os.ReadFile(checksumPath); err == nil {
+		short := strings.TrimSpace(string(storedChecksum))
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		// If plugin root is available, verify checksum matches current source.
+		pluginRoot := os.Getenv("CLAUDE_PLUGIN_ROOT")
+		if pluginRoot != "" {
+			sourceDir := filepath.Join(pluginRoot, "mcp-server")
+			if currentChecksum, err := computeSourceChecksum(sourceDir); err == nil {
+				stored := strings.TrimSpace(string(storedChecksum))
+				if stored == currentChecksum {
+					pass("build_cache", fmt.Sprintf("checksum %s — binary matches source", short))
+				} else {
+					warn("build_cache", fmt.Sprintf("checksum mismatch — binary is stale (have %s, want %s)", short, currentChecksum[:12]))
+				}
+			} else {
+				pass("build_cache", fmt.Sprintf("checksum %s — source not readable for verification", short))
+			}
+		} else {
+			pass("build_cache", fmt.Sprintf("checksum %s — source not available for verification", short))
+		}
 	} else {
 		warn("build_cache", "no source checksum — binary may be stale")
 	}
@@ -959,4 +1000,39 @@ func printHealthcheck(results []healthcheckResult) {
 		fmt.Printf("  %-6s %-25s %s\n", icon, r.Name, r.Detail)
 	}
 	fmt.Printf("\n  %d passed, %d warnings, %d failed\n", passes, warns, fails)
+}
+
+// computeSourceChecksum computes a SHA-256 over all .go files in sourceDir
+// (sorted, excluding vendor/), matching the shell checksum logic in launcher.sh.
+func computeSourceChecksum(sourceDir string) (string, error) {
+	var files []string
+	err := filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == "vendor" {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".go") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(files)
+
+	// Hash each file's content individually, then hash the concatenated per-file hashes.
+	// This mirrors: find ... | sort | xargs shasum -a 256 | shasum -a 256
+	outer := sha256.New()
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return "", err
+		}
+		h := sha256.Sum256(data)
+		fmt.Fprintf(outer, "%s  %s\n", hex.EncodeToString(h[:]), f)
+	}
+	return hex.EncodeToString(outer.Sum(nil)), nil
 }
