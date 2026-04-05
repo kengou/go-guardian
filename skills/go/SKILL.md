@@ -34,6 +34,7 @@ Use the `go-guardian:orchestrator` agent definition (loaded in conversation cont
 
 When invoked with no arguments on a project with `go.mod`, execute the full scan directly:
 
+### Phase 1: MCP + Automated Tools
 1. **check_staleness** — if stale scans exist, report them first
 2. Announce: "Running full Go Guardian scan..."
 3. Run via Bash:
@@ -44,7 +45,25 @@ When invoked with no arguments on a project with `go.mod`, execute the full scan
 4. **check_owasp** — call with project root path
 5. **check_deps** — read go.mod, extract modules, call with modules array
 6. **query_knowledge** — get anti-pattern context
-7. **get_pattern_stats** — show learning summary
-8. **get_health_trends** — append trends section to report
+
+### Phase 2: Deep Analysis via agent-teams
+
+After MCP and automated tools complete, invoke agent-teams for deep manual analysis:
+
+```
+/team-spawn security
+```
+Spawns 4 parallel security reviewers (OWASP, auth, deps, config).
+
+```
+/agent-teams:team-review . --reviewers performance,architecture,testing
+```
+Spawns 3 parallel reviewers for performance, architecture, and testing dimensions.
+
+### Phase 3: Consolidate Report
+1. Merge MCP findings + automated tool output + agent-teams findings
+2. Deduplicate (same file:line → keep most detailed)
+3. **get_pattern_stats** — show learning summary
+4. **get_health_trends** — append trends section
 
 Consolidate all findings into a single report using the format from the orchestrator agent definition.
