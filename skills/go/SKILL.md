@@ -1,7 +1,7 @@
 ---
 name: go
 description: Central Go development orchestrator. Routes to specialized agents.
-argument-hint: "[scan|review|test|lint|security|deps|design|plan|implement|validate] [path|topic]"
+argument-hint: "[scan|review|test|lint|security|deps|design|plan|implement|validate|docs|explain|diagram|adr|api-docs] [path|topic]"
 paths: "*.go,go.mod,go.sum"
 tools:
   - mcp__go-guardian__query_knowledge
@@ -44,6 +44,28 @@ Keywords that trigger beastmode routing:
 
 When beastmode intent is detected, pass the remaining arguments as the topic/epic name.
 Example: `/go design a caching layer` → `/beastmode:design a caching layer`
+
+**Routing to documentation** (code-documentation + documentation-generation plugins):
+
+Basic docs:
+- docs → invoke `/doc-generate` — README, architecture overview, code documentation
+- explain → invoke `/code-explain` — code explanation with visual diagrams and step-by-step breakdowns
+- changelog → invoke `/changelog-automation` — generate changelog from git history
+
+Extended docs:
+- docs --full → invoke `docs-architect` agent for comprehensive technical manual (10-100+ pages), then `mermaid-expert` agent for architecture diagrams, then `reference-builder` agent for API reference
+- diagram → invoke `mermaid-expert` agent — architecture diagrams, flowcharts, ERDs, sequence diagrams
+- adr → invoke `/architecture-decision-records` — document architectural decisions in ADR format
+- api-docs → invoke `/openapi-spec-generation` — generate OpenAPI 3.1 spec from Go code
+
+Keywords that trigger documentation routing:
+- **docs**: "docs", "documentation", "document", "readme", "generate docs"
+- **docs --full**: "full docs", "comprehensive docs", "technical manual", "ebook"
+- **explain**: "explain", "how does this work", "walk me through", "what does this do"
+- **diagram**: "diagram", "architecture diagram", "flowchart", "mermaid", "ERD", "sequence diagram"
+- **adr**: "ADR", "architecture decision", "decision record", "document decision"
+- **api-docs**: "API docs", "OpenAPI", "swagger", "API reference", "API spec"
+- **changelog**: "changelog", "release notes", "what changed"
 
 ## Full Scan (no args on existing project)
 
