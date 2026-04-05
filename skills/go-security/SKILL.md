@@ -32,15 +32,41 @@ Also run via Bash:
 
 After finding a security issue, call **report_finding** so other agents can benefit.
 
-## Analysis Context
+## Step 2: Deep Security Audit via team-spawn security
 
-Use the `go-guardian:security` agent definition (loaded in conversation context) for:
-- OWASP A01-A10 Go-specific patterns
-- Project-specific security patterns (K8s, HTTP, TLS, signing, policy, operator, mesh, auth, container)
-- Banned dependency list
-- Remediation guidance and report format
-- Escalation criteria for security-auditor (threat modeling, compliance, auth architecture)
+After MCP tool calls complete, invoke the agent-teams security preset for deep manual source code analysis. MCP tools check cached patterns and known CVEs; the security team reads actual source and finds issues that pattern matching misses.
 
-## Report Format
+Invoke:
+```
+/team-spawn security
+```
 
-Follow the report format from the security agent: group by severity (CRITICAL/HIGH/MEDIUM/LOW), include dependency status, banned dependencies, and summary counts.
+This spawns 4 parallel security reviewers:
+- **OWASP/Vulns** — injection, XSS, CSRF, deserialization, SSRF
+- **Auth/Access** — authentication, authorization, session management
+- **Dependencies** — CVEs, supply chain, outdated packages, license risks
+- **Secrets/Config** — hardcoded secrets, env vars, debug endpoints, CORS
+
+## Step 3: Merge and Report
+
+Combine findings from both passes into a single report:
+
+1. **MCP findings** — from check_owasp, check_deps, govulncheck
+2. **Security team findings** — from 4 parallel security reviewers (OWASP, auth, deps, config)
+3. **Deduplicate** — if both found the same issue, keep the one with more detail
+4. **Severity ordering** — CRITICAL → HIGH → MEDIUM → LOW
+
+Finding format:
+```
+[SEVERITY] file.go:line — Short description
+Evidence: <the actual code>
+Attack vector: <how it could be exploited>
+Fix: <concrete secure code example>
+OWASP: <category reference>
+```
+
+Include dependency status, banned dependencies, and summary counts.
+
+## Escalation
+
+Escalate to `security-auditor` for: threat modeling, compliance (GDPR/SOC2/HIPAA), auth architecture (OAuth2/OIDC design), supply chain (SBOM/SLSA).

@@ -38,6 +38,16 @@ Classify the request into one of these categories:
 | dockerfile | "Dockerfile", "docker", "container image", "multi-stage", "distroless", "scratch image" | go-guardian:patterns (Docker context) + go-guardian:security |
 | helm | "helm", "chart", "values.yaml", "helm template", "_helpers.tpl", "helm chart" | go-guardian:patterns (Helm context) + go-guardian:security |
 | k8s-manifest | "manifest", "YAML", "deployment.yaml", "service.yaml", "networkpolicy", "PDB", "securityContext", "RBAC" | go-guardian:patterns (K8s resource context) + go-guardian:security |
+| design | "design", "new feature", "add feature", "feature request", "PRD", "spec" | `/beastmode:design <topic>` |
+| plan | "plan", "break down", "decompose", "task breakdown" | `/beastmode:plan <epic-name>` |
+| implement | "implement", "build", "develop", "code this", "create feature" | `/beastmode:implement <epic-name>-<feature-name>` |
+| validate | "validate", "verify", "release check", "pre-release" | `/beastmode:validate <epic-name>` |
+| docs | "docs", "documentation", "document", "readme", "generate docs" | `/doc-generate` (basic) or `docs-architect` + `mermaid-expert` + `reference-builder` (full) |
+| explain | "explain", "how does this work", "walk me through", "what does this do" | `/code-explain` |
+| diagram | "diagram", "architecture diagram", "flowchart", "mermaid", "ERD", "sequence diagram" | `mermaid-expert` agent |
+| adr | "ADR", "architecture decision", "decision record" | `/architecture-decision-records` |
+| api-docs | "API docs", "OpenAPI", "swagger", "API reference", "API spec" | `/openapi-spec-generation` |
+| changelog | "changelog", "release notes", "what changed" | `/changelog-automation` |
 
 ## Force Routes (always override classification)
 - Any mention of "CVE" or "OWASP" → security, no exceptions
@@ -56,6 +66,14 @@ Classify the request into one of these categories:
 - Any mention of "helm chart", "values.yaml", "_helpers.tpl" → patterns (Helm context) + security
 - Any mention of "securityContext", "NetworkPolicy", "PodSecurityAdmission" → patterns (K8s resource context) + security
 - Any mention of "PDB", "PodDisruptionBudget", "topologySpread" → patterns (K8s resource context)
+- Any mention of "design", "new feature", "PRD" → `/beastmode:design` (feature lifecycle)
+- Any mention of "ADR", "decision record" → `/architecture-decision-records`
+- Any mention of "OpenAPI", "swagger" → `/openapi-spec-generation`
+- Any mention of "mermaid", "flowchart", "ERD" → `mermaid-expert` agent
+- Any mention of "changelog", "release notes" → `/changelog-automation`
+- Any mention of "plan" + feature context → `/beastmode:plan`
+- Any mention of "implement" + feature/epic context → `/beastmode:implement`
+- Any mention of "validate" + epic context → `/beastmode:validate`
 
 ## Operator Context Injection
 
@@ -159,10 +177,12 @@ The go-guardian ecosystem works alongside these tools. Each owns a distinct laye
 | Tool | Layer | When to use |
 |---|---|---|
 | rtk | Token efficiency | Transparent — PreToolUse hook compresses Bash output automatically. Use `rtk gain` to check savings |
-| beastmode | Lifecycle | `/plan` before features, `/implement` to build, `/validate` to verify |
+| beastmode | Lifecycle | Design/plan/implement/validate — route via `/beastmode:design`, `/beastmode:plan`, `/beastmode:implement`, `/beastmode:validate` |
 | agent-teams | Parallelism | go-guardian:reviewer delegates here for large PR dimensions |
 | security-auditor | Architecture security | go-guardian:security escalates here for threat modeling and compliance |
 | go-guardian MCP tools | Persistent memory | Only go-guardian:* agents call these — this is the learning layer |
+| code-documentation | Basic docs | `/doc-generate`, `/code-explain` — README, code explanation, tutorials |
+| documentation-generation | Extended docs | `docs-architect`, `mermaid-expert`, `reference-builder`, `/architecture-decision-records`, `/changelog-automation`, `/openapi-spec-generation` |
 
 ## Full Scan Sequence (no args on existing project)
 When the user runs `/go` with no arguments on a project that has `go.mod`:

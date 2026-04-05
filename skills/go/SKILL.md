@@ -1,7 +1,7 @@
 ---
 name: go
 description: Central Go development orchestrator. Routes to specialized agents.
-argument-hint: "[scan|review|test|lint|security|deps] [path]"
+argument-hint: "[scan|review|test|lint|security|deps|design|plan|implement|validate|docs|explain|diagram|adr|api-docs] [path|topic]"
 paths: "*.go,go.mod,go.sum"
 tools:
   - mcp__go-guardian__query_knowledge
@@ -30,10 +30,48 @@ Use the `go-guardian:orchestrator` agent definition (loaded in conversation cont
 - patterns → invoke `/go-patterns`
 - renovate → invoke `/renovate`
 
+**Routing to beastmode** (feature lifecycle):
+- design → invoke `/beastmode:design <topic>`
+- plan → invoke `/beastmode:plan <epic-name>`
+- implement → invoke `/beastmode:implement <epic-name>-<feature-name>`
+- validate → invoke `/beastmode:validate <epic-name>`
+
+Keywords that trigger beastmode routing:
+- **design**: "design", "new feature", "add feature", "feature request", "PRD", "spec"
+- **plan**: "plan", "break down", "decompose", "task breakdown"
+- **implement**: "implement", "build", "develop", "code this", "create feature"
+- **validate**: "validate", "verify", "release check", "pre-release"
+
+When beastmode intent is detected, pass the remaining arguments as the topic/epic name.
+Example: `/go design a caching layer` → `/beastmode:design a caching layer`
+
+**Routing to documentation** (code-documentation + documentation-generation plugins):
+
+Basic docs:
+- docs → invoke `/doc-generate` — README, architecture overview, code documentation
+- explain → invoke `/code-explain` — code explanation with visual diagrams and step-by-step breakdowns
+- changelog → invoke `/changelog-automation` — generate changelog from git history
+
+Extended docs:
+- docs --full → invoke `docs-architect` agent for comprehensive technical manual (10-100+ pages), then `mermaid-expert` agent for architecture diagrams, then `reference-builder` agent for API reference
+- diagram → invoke `mermaid-expert` agent — architecture diagrams, flowcharts, ERDs, sequence diagrams
+- adr → invoke `/architecture-decision-records` — document architectural decisions in ADR format
+- api-docs → invoke `/openapi-spec-generation` — generate OpenAPI 3.1 spec from Go code
+
+Keywords that trigger documentation routing:
+- **docs**: "docs", "documentation", "document", "readme", "generate docs"
+- **docs --full**: "full docs", "comprehensive docs", "technical manual", "ebook"
+- **explain**: "explain", "how does this work", "walk me through", "what does this do"
+- **diagram**: "diagram", "architecture diagram", "flowchart", "mermaid", "ERD", "sequence diagram"
+- **adr**: "ADR", "architecture decision", "decision record", "document decision"
+- **api-docs**: "API docs", "OpenAPI", "swagger", "API reference", "API spec"
+- **changelog**: "changelog", "release notes", "what changed"
+
 ## Full Scan (no args on existing project)
 
 When invoked with no arguments on a project with `go.mod`, execute the full scan directly:
 
+### Phase 1: MCP + Automated Tools
 1. **check_staleness** — if stale scans exist, report them first
 2. Announce: "Running full Go Guardian scan..."
 3. Run via Bash:
@@ -44,7 +82,25 @@ When invoked with no arguments on a project with `go.mod`, execute the full scan
 4. **check_owasp** — call with project root path
 5. **check_deps** — read go.mod, extract modules, call with modules array
 6. **query_knowledge** — get anti-pattern context
-7. **get_pattern_stats** — show learning summary
-8. **get_health_trends** — append trends section to report
+
+### Phase 2: Deep Analysis via agent-teams
+
+After MCP and automated tools complete, invoke agent-teams for deep manual analysis:
+
+```
+/team-spawn security
+```
+Spawns 4 parallel security reviewers (OWASP, auth, deps, config).
+
+```
+/agent-teams:team-review . --reviewers performance,architecture,testing
+```
+Spawns 3 parallel reviewers for performance, architecture, and testing dimensions.
+
+### Phase 3: Consolidate Report
+1. Merge MCP findings + automated tool output + agent-teams findings
+2. Deduplicate (same file:line → keep most detailed)
+3. **get_pattern_stats** — show learning summary
+4. **get_health_trends** — append trends section
 
 Consolidate all findings into a single report using the format from the orchestrator agent definition.

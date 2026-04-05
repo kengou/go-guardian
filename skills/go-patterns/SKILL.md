@@ -29,5 +29,22 @@ Based on user's request, call the appropriate tools:
 - **search \<keyword\>**: call `query_knowledge` with the keyword
 - **stats**: call `get_pattern_stats` and `get_health_trends`
 - **fix \<file\>**: call `suggest_fix` with the file path and code context
+- **scan**: run full architecture review (see Step 2)
+
+## Step 2: Architecture Review via team-review
+
+When scanning for anti-patterns across the codebase (not just querying the pattern DB), invoke `agent-teams:team-review` for deep architectural analysis:
+
+```
+/agent-teams:team-review . --reviewers architecture
+```
+
+This spawns an architecture reviewer that will:
+- Check SOLID principles, separation of concerns, coupling
+- Identify god structs, leaky abstractions, circular dependencies
+- Review API contract design and error handling patterns
+- Produce structured findings that complement the MCP pattern database
+
+Merge team-review findings with MCP pattern data for the final report.
 
 Use the `go-guardian:patterns` agent definition (loaded in conversation context) for anti-pattern categories, infrastructure patterns (Docker/Helm/K8s), and pattern analysis methodology.

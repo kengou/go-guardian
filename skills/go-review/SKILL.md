@@ -30,8 +30,30 @@ You MUST call the MCP tools below as part of every code review. Do NOT delegate 
 ### At end of report:
 5. **get_pattern_stats** — show learning summary.
 
-## Review Workflow
+## Step 2: Automated Checks via Bash
 
-1. Run `go build ./...`, `go vet ./...`, `golangci-lint run ./...` via Bash
-2. Use the `go-guardian:reviewer` agent definition (loaded in conversation context) for the 6-phase review methodology, finding format, severity levels, and all pattern checks (error handling, concurrency, testing, security, observability, API design, K8s operators, mesh/proxy, infrastructure files)
-3. For large PRs (>10 files or >500 lines), delegate Performance and Architecture dimensions to team-reviewer agents — but retain Go patterns review and MCP calls yourself
+Run and report results:
+- `go build ./...` — must compile
+- `go vet ./...` — must be clean
+- `golangci-lint run ./...` — note all findings
+
+## Step 3: Deep Code Review via team-review
+
+After MCP tools and automated checks, invoke `agent-teams:team-review` for multi-dimension manual analysis:
+
+```
+/agent-teams:team-review . --reviewers security,performance,architecture
+```
+
+This spawns parallel reviewers for security, performance, and architecture dimensions. They read actual source code and produce structured findings that MCP pattern matching alone would miss.
+
+## Step 4: Merge and Report
+
+Combine findings from all passes:
+1. **MCP learned patterns** — from query_knowledge (issues that were fixed before in this codebase)
+2. **Automated checks** — from go build/vet/lint
+3. **Team review findings** — from security, performance, architecture reviewers
+4. **Deduplicate** — same file:line from multiple sources → keep most detailed
+5. **Learning loop** — after user accepts a fix, call `learn_from_review`
+
+Use the `go-guardian:reviewer` agent definition (loaded in conversation context) for the finding format, severity levels, and Go-specific pattern knowledge.
