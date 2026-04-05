@@ -55,7 +55,15 @@ func main() {
 	flag.Parse()
 
 	if *projectDir == "" {
-		*projectDir = filepath.Dir(*dbPath)
+		// Default to CWD so check_owasp can scan the user's actual project.
+		// The MCP server inherits CWD from Claude Code (the user's project dir).
+		// Falling back to the DB directory would restrict scans to the plugin
+		// data directory, making check_owasp unusable.
+		if cwd, err := os.Getwd(); err == nil {
+			*projectDir = cwd
+		} else {
+			*projectDir = filepath.Dir(*dbPath)
+		}
 	}
 
 	if *showVersion {
