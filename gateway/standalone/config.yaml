@@ -33,12 +33,12 @@ binds:
                 file: ../openapi/go-vuln.json
               host: vuln.go.dev
           - name: newrelic
-            stdio:
-              cmd: node
-              args: ["../newrelic/bridge.mjs"]
-              env:
-                NEW_RELIC_API_KEY: "${NEW_RELIC_API_KEY}"
-                NEW_RELIC_REGION: "${NEW_RELIC_REGION}"
+            mcp:
+              host: "${NEW_RELIC_MCP_URL:-https://mcp.newrelic.com/mcp/}"
+            policies:
+              requestHeaderModifier:
+                set:
+                  Api-Key: "${NEW_RELIC_API_KEY}"
         policies:
           cors:
             allowOrigins:

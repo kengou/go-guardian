@@ -104,6 +104,25 @@ binds:
               host: vuln.go.dev
 GWEOF
 
+  # Append New Relic MCP target if API key is set (remote Streamable HTTP — no Node.js bridge).
+  if [[ -n "${NEW_RELIC_API_KEY:-}" ]]; then
+    NR_REGION="${NEW_RELIC_REGION:-us}"
+    if [[ "${NR_REGION}" == "eu" ]]; then
+      NR_MCP_URL="https://mcp.eu.newrelic.com/mcp/"
+    else
+      NR_MCP_URL="https://mcp.newrelic.com/mcp/"
+    fi
+    cat >> "${GATEWAY_CONFIG}" <<NREOF
+          - name: newrelic
+            mcp:
+              host: ${NR_MCP_URL}
+            policies:
+              requestHeaderModifier:
+                set:
+                  Api-Key: "\${NEW_RELIC_API_KEY}"
+NREOF
+  fi
+
   # ── Docker config (OpenAPI backends only — go-guardian stays on stdio via .mcp.json) ──
   GATEWAY_DOCKER_CONFIG="${GUARDIAN_DIR}/gateway-docker-config.yaml"
   cat > "${GATEWAY_DOCKER_CONFIG}" <<GWEOF
@@ -150,6 +169,25 @@ binds:
                 file: /openapi/go-vuln.json
               host: vuln.go.dev
 GWEOF
+
+  # Append New Relic MCP target to Docker config too.
+  if [[ -n "${NEW_RELIC_API_KEY:-}" ]]; then
+    NR_REGION="${NEW_RELIC_REGION:-us}"
+    if [[ "${NR_REGION}" == "eu" ]]; then
+      NR_MCP_URL="https://mcp.eu.newrelic.com/mcp/"
+    else
+      NR_MCP_URL="https://mcp.newrelic.com/mcp/"
+    fi
+    cat >> "${GATEWAY_DOCKER_CONFIG}" <<NREOF
+          - name: newrelic
+            mcp:
+              host: ${NR_MCP_URL}
+            policies:
+              requestHeaderModifier:
+                set:
+                  Api-Key: "\${NEW_RELIC_API_KEY}"
+NREOF
+  fi
 
   # ── Auto-start gateway if opted in ────────────────────────────────────────
   GW_MODE="${GO_GUARDIAN_GATEWAY:-}"
