@@ -172,5 +172,6 @@ jobs:
         with:
           # Fail on any newly introduced HIGH or CRITICAL vulnerability.
           fail-on-severity: high
-          # go.sum covers transitive deps; go.mod is the direct manifest.
-          dependency-files: mcp-server/go.mod,mcp-server/go.sum
+          # Allow golang.org/x/text v0.3.6 CVEs — intentionally pinned
+          # in test/e2e/fixture/ as a known-vulnerable dependency for e2e testing.
+          allow-ghsas: GHSA-ppp9-7jff-5vj2, GHSA-69ch-w2m2-3vjp
