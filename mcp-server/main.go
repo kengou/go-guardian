@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -29,6 +30,14 @@ import (
 const version = "0.3.1"
 
 func main() {
+	// ── Subcommand dispatch (new CLI mode) ────────────────────────────────
+	// If invoked with a positional subcommand (e.g. `go-guardian healthcheck`),
+	// enter CLI mode and exit. No-arg and flag-only invocations fall through
+	// to the legacy MCP stdio server path below.
+	if isSubcommandInvocation(os.Args) {
+		os.Exit(Dispatch(os.Args[1:], os.Stdout, os.Stderr))
+	}
+
 	dbPath := flag.String("db", ".go-guardian/guardian.db", "path to the SQLite database file")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	prefetch := flag.Bool("prefetch", false, "fetch CVE data for modules in go.mod and exit")
@@ -322,6 +331,181 @@ func main() {
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("MCP server error: %v", err)
 	}
+}
+
+// ── Subcommand dispatch layer ──────────────────────────────────────────────
+//
+// Dispatch enters CLI mode when go-guardian is invoked with a positional
+// subcommand (e.g. `go-guardian healthcheck`). It parses the subcommand from
+// args[0], routes to the corresponding handler, and returns an exit code.
+//
+// Supported subcommands (wave 1 reality):
+//
+//	version       — prints the binary version, exits 0
+//	help / --help / -h — prints subcommand listing, exits 0
+//	healthcheck   — runs diagnostic checks (real handler, calls runHealthcheck)
+//	scan          — placeholder (wave 2: scan-subcommands feature)
+//	ingest        — placeholder (wave 2: inbox-ingest feature)
+//	renovate      — placeholder (wave 2: renovate-cli-pack feature)
+//	admin         — placeholder (wave 2: admin-cli feature)
+//
+// Placeholder handlers exit 1 with a "not yet implemented in this build"
+// message so scripts calling them fail loud rather than silently succeeding.
+//
+// Dispatch writes exclusively to the provided stdout/stderr. Callers that
+// test it pass bytes.Buffer; main() passes os.Stdout/os.Stderr.
+func Dispatch(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return dispatchHelp(nil, stdout, stderr)
+	}
+
+	head := args[0]
+	rest := args[1:]
+
+	// Legacy long-form aliases.
+	switch head {
+	case "--help", "-h":
+		return dispatchHelp(rest, stdout, stderr)
+	case "--version":
+		return dispatchVersion(rest, stdout, stderr)
+	}
+
+	handler, ok := subcommandRegistry[head]
+	if !ok {
+		fmt.Fprintf(stderr, "go-guardian: unknown subcommand %q\n\n", head)
+		printSubcommandListing(stderr)
+		return 1
+	}
+	return handler(rest, stdout, stderr)
+}
+
+// subcommandHandler is the signature every dispatch handler must satisfy.
+type subcommandHandler func(args []string, stdout, stderr io.Writer) int
+
+// subcommandRegistry is the authoritative list of CLI subcommands. Placeholder
+// handlers for wave-2 features are present so that --help listing covers the
+// full future surface from day one.
+var subcommandRegistry = map[string]subcommandHandler{
+	"version":     dispatchVersion,
+	"help":        dispatchHelp,
+	"healthcheck": dispatchHealthcheck,
+	"scan":        dispatchPlaceholderFor("scan", "scan-subcommands (wave 2)"),
+	"ingest":      dispatchPlaceholderFor("ingest", "inbox-ingest (wave 2)"),
+	"renovate":    dispatchPlaceholderFor("renovate", "renovate-cli-pack (wave 2)"),
+	"admin":       dispatchPlaceholderFor("admin", "admin-cli (wave 2)"),
+}
+
+// subcommandDescriptions backs the --help listing. Keys must mirror
+// subcommandRegistry so a drift check is possible at test time.
+var subcommandDescriptions = map[string]string{
+	"scan":        "Run OWASP / deps / staleness / pattern scans and write findings files under .go-guardian/",
+	"ingest":      "Ingest pending agent-inbox documents into the learning database",
+	"renovate":    "Validate, analyze, suggest, query, or report stats on renovate configurations",
+	"admin":       "Start the on-demand admin dashboard in the foreground",
+	"healthcheck": "Run diagnostic checks on DB schema, seeds, and tool registration",
+	"version":     "Print the go-guardian binary version",
+	"help":        "Print this help listing",
+}
+
+// dispatchVersion implements `go-guardian version` and `go-guardian --version`.
+func dispatchVersion(_ []string, stdout, _ io.Writer) int {
+	fmt.Fprintf(stdout, "go-guardian-mcp v%s\n", version)
+	return 0
+}
+
+// dispatchHelp prints the subcommand listing.
+func dispatchHelp(_ []string, stdout, _ io.Writer) int {
+	fmt.Fprintf(stdout, "go-guardian-mcp v%s\n\n", version)
+	fmt.Fprintln(stdout, "Usage: go-guardian [subcommand] [flags]")
+	fmt.Fprintln(stdout, "       go-guardian          (no subcommand starts the MCP stdio server)")
+	fmt.Fprintln(stdout)
+	printSubcommandListing(stdout)
+	return 0
+}
+
+// printSubcommandListing writes the subcommand table to w. Used by both help
+// and by unknown-subcommand error output.
+func printSubcommandListing(w io.Writer) {
+	// Deterministic order: hand-rolled to group real commands then placeholders.
+	order := []string{"scan", "ingest", "renovate", "admin", "healthcheck", "version", "help"}
+	fmt.Fprintln(w, "Subcommands:")
+	for _, name := range order {
+		desc, ok := subcommandDescriptions[name]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(w, "  %-12s %s\n", name, desc)
+	}
+}
+
+// dispatchHealthcheck implements `go-guardian healthcheck`. It parses a
+// standalone --db flag so subcommand mode is self-contained (does not lean
+// on the legacy top-level flag parser).
+func dispatchHealthcheck(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dbPath := fs.String("db", ".go-guardian/guardian.db", "path to the SQLite database file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	return runHealthcheckOn(*dbPath, stdout, stderr)
+}
+
+// runHealthcheckOn is a thin wrapper around runHealthcheck that redirects
+// stdout/stderr for the duration of the call. It exists so Dispatch handlers
+// can inject buffers for testing while runHealthcheck itself remains a
+// straightforward fmt.Print* based diagnostic.
+func runHealthcheckOn(dbPath string, stdout, stderr io.Writer) int {
+	origOut := os.Stdout
+	origErr := os.Stderr
+
+	rOut, wOut, _ := os.Pipe()
+	rErr, wErr, _ := os.Pipe()
+	os.Stdout = wOut
+	os.Stderr = wErr
+
+	// Copy pipe output to the dispatch writers in background goroutines.
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(stdout, rOut); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(stderr, rErr); done <- struct{}{} }()
+
+	exitCode := runHealthcheck(dbPath)
+
+	_ = wOut.Close()
+	_ = wErr.Close()
+	<-done
+	<-done
+	os.Stdout = origOut
+	os.Stderr = origErr
+
+	return exitCode
+}
+
+// dispatchPlaceholderFor returns a subcommandHandler for subcommands not yet
+// implemented in this wave. It prints a clear "not yet implemented" message
+// naming which wave-2 feature will add the real handler, then exits 1.
+func dispatchPlaceholderFor(name, feature string) subcommandHandler {
+	return func(_ []string, _, stderr io.Writer) int {
+		fmt.Fprintf(stderr,
+			"go-guardian %s: not yet implemented in this build — will be added in the %s feature\n",
+			name, feature)
+		return 1
+	}
+}
+
+// isSubcommandInvocation returns true when the process was invoked with a
+// positional subcommand OR a recognized long-form flag alias (--help, -h,
+// --version) that the new dispatch layer owns.
+func isSubcommandInvocation(osArgs []string) bool {
+	if len(osArgs) < 2 {
+		return false
+	}
+	first := osArgs[1]
+	switch first {
+	case "--help", "-h", "--version":
+		return true
+	}
+	return first != "" && !strings.HasPrefix(first, "-")
 }
 
 // loggingRegistrar wraps MCP tool registration to log every tool invocation.
@@ -837,20 +1021,12 @@ func runHealthcheck(dbPath string) int {
 	// 1. Binary version
 	pass("binary", fmt.Sprintf("go-guardian-mcp v%s", version))
 
-	// 2. DB file
+	// 2. DB file and early schema check
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		fail("db_directory", fmt.Sprintf("cannot create: %v", err))
 		printHealthcheck(results)
 		return 1
 	}
-
-	store, err := db.NewStore(dbPath)
-	if err != nil {
-		fail("db_open", fmt.Sprintf("cannot open: %v", err))
-		printHealthcheck(results)
-		return 1
-	}
-	defer store.Close()
 
 	info, err := os.Stat(dbPath)
 	if err != nil {
@@ -864,31 +1040,59 @@ func runHealthcheck(dbPath string) int {
 		}
 	}
 
-	// 3. Schema tables
+	// 3. Schema tables — check BEFORE NewStore to detect corruption
+	// (NewStore triggers migration which auto-recovers missing tables).
 	expectedTables := []string{
 		"lint_patterns", "owasp_findings", "vuln_cache", "scan_history",
 		"anti_patterns", "dep_decisions", "scan_snapshots", "session_findings",
 		"renovate_preferences", "renovate_rules", "config_scores",
 	}
-	tableRows, err := store.HealthcheckTables()
-	if err != nil {
-		fail("schema", fmt.Sprintf("cannot query tables: %v", err))
-	} else {
-		tableSet := make(map[string]bool, len(tableRows))
-		for _, t := range tableRows {
-			tableSet[t] = true
-		}
-		missing := 0
-		for _, t := range expectedTables {
-			if !tableSet[t] {
-				missing++
-				fail("table_"+t, "missing")
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err == nil {
+		defer rawDB.Close()
+		tableRows, err := func() ([]string, error) {
+			rows, err := rawDB.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var tables []string
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					return nil, err
+				}
+				tables = append(tables, name)
+			}
+			return tables, rows.Err()
+		}()
+		if err != nil {
+			fail("schema", fmt.Sprintf("cannot query tables: %v", err))
+		} else {
+			tableSet := make(map[string]bool, len(tableRows))
+			for _, t := range tableRows {
+				tableSet[t] = true
+			}
+			missing := 0
+			for _, t := range expectedTables {
+				if !tableSet[t] {
+					missing++
+					fail("table_"+t, "missing")
+				}
+			}
+			if missing == 0 {
+				pass("schema", fmt.Sprintf("%d/%d tables present", len(expectedTables), len(expectedTables)))
 			}
 		}
-		if missing == 0 {
-			pass("schema", fmt.Sprintf("%d/%d tables present", len(expectedTables), len(expectedTables)))
-		}
 	}
+
+	store, err := db.NewStore(dbPath)
+	if err != nil {
+		fail("db_open", fmt.Sprintf("cannot open: %v", err))
+		printHealthcheck(results)
+		return 1
+	}
+	defer store.Close()
 
 	// 4. Seed data
 	counts, err := store.HealthcheckCounts()
