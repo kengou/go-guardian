@@ -469,16 +469,16 @@ func runHealthcheckOn(dbPath string, stdout, stderr io.Writer) int {
 	go func() { _, _ = io.Copy(stdout, rOut); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(stderr, rErr); done <- struct{}{} }()
 
-	exitCode := runHealthcheck(dbPath)
+	defer func() {
+		_ = wOut.Close()
+		_ = wErr.Close()
+		<-done
+		<-done
+		os.Stdout = origOut
+		os.Stderr = origErr
+	}()
 
-	_ = wOut.Close()
-	_ = wErr.Close()
-	<-done
-	<-done
-	os.Stdout = origOut
-	os.Stderr = origErr
-
-	return exitCode
+	return runHealthcheck(dbPath)
 }
 
 // dispatchPlaceholderFor returns a subcommandHandler for subcommands not yet
@@ -1048,9 +1048,11 @@ func runHealthcheck(dbPath string) int {
 		"renovate_preferences", "renovate_rules", "config_scores",
 	}
 	rawDB, err := sql.Open("sqlite", dbPath)
-	if err == nil {
+	if err != nil {
+		fail("schema_precheck", fmt.Sprintf("cannot open db for schema check: %v", err))
+	} else {
 		defer rawDB.Close()
-		tableRows, err := func() ([]string, error) {
+		tableRows, queryErr := func() ([]string, error) {
 			rows, err := rawDB.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 			if err != nil {
 				return nil, err
@@ -1066,8 +1068,8 @@ func runHealthcheck(dbPath string) int {
 			}
 			return tables, rows.Err()
 		}()
-		if err != nil {
-			fail("schema", fmt.Sprintf("cannot query tables: %v", err))
+		if queryErr != nil {
+			fail("schema", fmt.Sprintf("cannot query tables: %v", queryErr))
 		} else {
 			tableSet := make(map[string]bool, len(tableRows))
 			for _, t := range tableRows {
