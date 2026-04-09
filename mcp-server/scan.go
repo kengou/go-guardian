@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/tools"
 )
 
 // scanDimensions captures which scan dimensions the user requested on the CLI.
@@ -122,10 +125,11 @@ func dispatchScan(args []string, stdout, stderr io.Writer) int {
 // never leaves a half-formed file. Parent directory must already exist.
 //
 // Frontmatter fields:
-//   scan_type       — e.g. "owasp", "deps", "staleness", "pattern-stats"
-//   source_checksum — sha256 over *.go files excluding vendor/
-//   generated_at    — RFC3339 UTC timestamp
-//   count           — finding count (0 is a valid "no findings" result)
+//
+//	scan_type       — e.g. "owasp", "deps", "staleness", "pattern-stats"
+//	source_checksum — sha256 over *.go files excluding vendor/
+//	generated_at    — RFC3339 UTC timestamp
+//	count           — finding count (0 is a valid "no findings" result)
 func writeScanOutput(path, scanType, checksum string, generatedAt time.Time, count int, body string) error {
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -213,4 +217,102 @@ func allFilesExist(dir string, names []string) bool {
 		}
 	}
 	return true
+}
+
+// runOwaspDimension runs tools.RunCheckOWASP against sourceDir and writes
+// .go-guardian/owasp-findings.md. The OWASP handler already persists its
+// findings + scan history + snapshot as a side-effect — this wrapper adds
+// only the markdown file output.
+func runOwaspDimension(store *db.Store, sourceDir, guardianDir, checksum string, now time.Time) error {
+	text, err := tools.RunCheckOWASP(store, sourceDir, sourceDir)
+	if err != nil {
+		return fmt.Errorf("owasp scan: %w", err)
+	}
+	path := filepath.Join(guardianDir, "owasp-findings.md")
+	return writeScanOutput(path, "owasp", checksum, now, countLines(text), text)
+}
+
+// runDepsDimension reads sourceDir/go.mod (if present), runs
+// tools.RunCheckDeps over the module list, and writes
+// .go-guardian/dep-vulns.md. A missing go.mod is treated as "no modules" and
+// produces a valid empty report rather than an error — the scan is still
+// considered successful.
+func runDepsDimension(store *db.Store, sourceDir, guardianDir, checksum string, now time.Time) error {
+	var modules []string
+	goMod := filepath.Join(sourceDir, "go.mod")
+	if _, err := os.Stat(goMod); err == nil {
+		mods, pErr := tools.ParseGoMod(goMod)
+		if pErr != nil {
+			return fmt.Errorf("parse go.mod: %w", pErr)
+		}
+		modules = mods
+	}
+	text, err := tools.RunCheckDeps(store, modules)
+	if err != nil {
+		return fmt.Errorf("deps scan: %w", err)
+	}
+	path := filepath.Join(guardianDir, "dep-vulns.md")
+	return writeScanOutput(path, "deps", checksum, now, len(modules), text)
+}
+
+// runStalenessDimension runs tools.RunCheckStaleness against sourceDir and
+// writes .go-guardian/staleness.md. Staleness has no concept of "count" — it
+// reports per-dimension currency — so count is 0.
+func runStalenessDimension(store *db.Store, sourceDir, guardianDir, checksum string, now time.Time) error {
+	text, err := tools.RunCheckStaleness(store, sourceDir)
+	if err != nil {
+		return fmt.Errorf("staleness scan: %w", err)
+	}
+	path := filepath.Join(guardianDir, "staleness.md")
+	return writeScanOutput(path, "staleness", checksum, now, 0, text)
+}
+
+// runPatternsDimension writes three snapshots of the learning DB:
+//   - pattern-stats.md   (tools.RunGetPatternStats)
+//   - health-trends.md   (tools.RunGetHealthTrends)
+//   - session-findings.md (tools.RunGetSessionFindings with empty session)
+//
+// The session-findings snapshot is intentionally session-less at this point —
+// CLI scans do not own a session; the "No active session..." message is a
+// valid snapshot of "nothing reported yet".
+func runPatternsDimension(store *db.Store, guardianDir, checksum string, now time.Time) error {
+	stats, err := tools.RunGetPatternStats(store, "")
+	if err != nil {
+		return fmt.Errorf("pattern-stats: %w", err)
+	}
+	if err := writeScanOutput(filepath.Join(guardianDir, "pattern-stats.md"),
+		"pattern-stats", checksum, now, countLines(stats), stats); err != nil {
+		return err
+	}
+
+	trends, err := tools.RunGetHealthTrends(store, "", "")
+	if err != nil {
+		return fmt.Errorf("health-trends: %w", err)
+	}
+	if err := writeScanOutput(filepath.Join(guardianDir, "health-trends.md"),
+		"health-trends", checksum, now, countLines(trends), trends); err != nil {
+		return err
+	}
+
+	// Empty sessionID returns "No active session — ..." which is exactly the
+	// snapshot we want to record when scans run outside of a /go session.
+	findings, err := tools.RunGetSessionFindings(store, "", "", "", "")
+	if err != nil {
+		return fmt.Errorf("session-findings: %w", err)
+	}
+	return writeScanOutput(filepath.Join(guardianDir, "session-findings.md"),
+		"session-findings", checksum, now, 0, findings)
+}
+
+// countLines returns the number of non-empty lines in s. Used as a coarse
+// "count" for frontmatter when the Run* helper doesn't expose a structured
+// finding total.
+func countLines(s string) int {
+	n := 0
+	for _, ln := range strings.Split(s, "\n") {
+		if strings.TrimSpace(ln) != "" {
+			n++
+		}
+	}
+	return n
 }
