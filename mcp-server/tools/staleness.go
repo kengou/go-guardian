@@ -44,6 +44,18 @@ func ProjectID(path string) string {
 	return parent + "/" + base
 }
 
+// RunCheckStaleness returns a human-readable staleness report for the project
+// rooted at projectPath. It is a thin exported wrapper around the existing
+// checkStaleness helper so that CLI callers (go-guardian scan) and MCP
+// callers share the same implementation.
+func RunCheckStaleness(store *db.Store, projectPath string) (string, error) {
+	projectPath = strings.TrimSpace(projectPath)
+	if projectPath == "" {
+		return "", fmt.Errorf("project_path is required")
+	}
+	return checkStaleness(store, projectPath)
+}
+
 // RegisterCheckStaleness registers the check_staleness MCP tool with s.
 // The tool accepts a project_path parameter and returns a human-readable
 // staleness report for the project's scan history.
@@ -58,12 +70,7 @@ func RegisterCheckStaleness(s ToolRegistrar, store *db.Store) {
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		rawPath := req.GetString("project_path", "")
-		rawPath = strings.TrimSpace(rawPath)
-		if rawPath == "" {
-			return mcp.NewToolResultError("project_path is required"), nil
-		}
-
-		report, err := checkStaleness(store, rawPath)
+		report, err := RunCheckStaleness(store, rawPath)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to read scan history: %v", err)), nil
 		}

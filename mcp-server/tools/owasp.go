@@ -16,6 +16,62 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// RunCheckOWASP scans scanPath for OWASP findings and returns a formatted
+// report. It performs the same store inserts (OWASP findings, scan history,
+// scan snapshot) as the MCP handler, so callers get identical side-effects.
+// scanPath is validated to be within projectRoot — paths outside it return
+// an error without any store mutations.
+//
+// This function is the CLI-callable surface for check_owasp and is invoked
+// by the go-guardian scan subcommand (wave 2: scan-subcommands feature).
+// The MCP RegisterCheckOWASP handler is now a thin wrapper around it.
+func RunCheckOWASP(store *db.Store, projectRoot, scanPath string) (string, error) {
+	scanPath = strings.TrimSpace(scanPath)
+	if scanPath == "" {
+		return "", fmt.Errorf("'path' parameter is required")
+	}
+
+	if err := validateScanPath(scanPath, projectRoot); err != nil {
+		return "", err
+	}
+
+	rules := owasp.DefaultRules()
+
+	info, err := os.Stat(scanPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot stat %q: %w", scanPath, err)
+	}
+
+	var findings []owasp.Finding
+	if info.IsDir() {
+		findings, err = owasp.ScanDirectory(scanPath, rules)
+	} else {
+		findings, err = owasp.ScanFile(scanPath, rules)
+	}
+	if err != nil {
+		return "", fmt.Errorf("scanning %q: %w", scanPath, err)
+	}
+
+	// Persist findings to the database in a single batch.
+	items := make([]db.OWASPFindingItem, len(findings))
+	for i, f := range findings {
+		items[i] = db.OWASPFindingItem{
+			Category:    f.Category,
+			FilePattern: filepath.Base(f.File),
+			Finding:     f.Message,
+			FixPattern:  "",
+		}
+	}
+	if err := store.InsertOWASPFindingsBatch(items); err != nil {
+		log.Printf("owasp: batch insert failed: %v", err)
+	}
+
+	_ = store.UpdateScanHistory("owasp", scanPath, len(findings))
+	_ = store.InsertScanSnapshot("owasp", scanPath, len(findings), buildOWASPSnapshotDetail(findings))
+
+	return formatFindings(scanPath, findings), nil
+}
+
 // RegisterCheckOWASP registers the check_owasp MCP tool.
 // projectRoot is the absolute path to the project being guarded;
 // scan paths are validated to be within this root (fixes FINDING-07).
@@ -32,55 +88,11 @@ func RegisterCheckOWASP(s ToolRegistrar, store *db.Store, projectRoot string) {
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		rawPath := req.GetString("path", "")
-		if strings.TrimSpace(rawPath) == "" {
-			return mcp.NewToolResultText("error: 'path' parameter is required"), nil
-		}
-		scanPath := strings.TrimSpace(rawPath)
-
-		// SECURITY: reject paths outside project root (fixes FINDING-07).
-		if err := validateScanPath(scanPath, projectRoot); err != nil {
+		result, err := RunCheckOWASP(store, projectRoot, rawPath)
+		if err != nil {
 			return mcp.NewToolResultText(fmt.Sprintf("error: %v", err)), nil
 		}
-
-		rules := owasp.DefaultRules()
-
-		// Determine whether we are scanning a file or directory.
-		info, err := os.Stat(scanPath)
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("error: cannot stat %q: %v", scanPath, err)), nil
-		}
-
-		var findings []owasp.Finding
-		if info.IsDir() {
-			findings, err = owasp.ScanDirectory(scanPath, rules)
-		} else {
-			findings, err = owasp.ScanFile(scanPath, rules)
-		}
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("error scanning %q: %v", scanPath, err)), nil
-		}
-
-		// Persist findings to the database in a single batch.
-		items := make([]db.OWASPFindingItem, len(findings))
-		for i, f := range findings {
-			items[i] = db.OWASPFindingItem{
-				Category:    f.Category,
-				FilePattern: filepath.Base(f.File),
-				Finding:     f.Message,
-				FixPattern:  "",
-			}
-		}
-		if err := store.InsertOWASPFindingsBatch(items); err != nil {
-			log.Printf("owasp: batch insert failed: %v", err)
-		}
-
-		// Update scan history and append trend snapshot.
-		_ = store.UpdateScanHistory("owasp", scanPath, len(findings))
-		_ = store.InsertScanSnapshot("owasp", scanPath, len(findings), buildOWASPSnapshotDetail(findings))
-
-		// Format output.
-		text := formatFindings(scanPath, findings)
-		return mcp.NewToolResultText(text), nil
+		return mcp.NewToolResultText(result), nil
 	})
 }
 

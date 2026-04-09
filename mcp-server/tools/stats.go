@@ -10,6 +10,16 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// RunGetPatternStats returns a formatted dashboard of lint patterns, OWASP
+// posture, and recent scans for the given project (or global if empty).
+func RunGetPatternStats(store *db.Store, project string) (string, error) {
+	stats, err := store.GetPatternStats(project)
+	if err != nil {
+		return "", fmt.Errorf("failed to get stats: %w", err)
+	}
+	return formatPatternStats(stats), nil
+}
+
 // RegisterGetPatternStats registers the get_pattern_stats MCP tool with the given server.
 func RegisterGetPatternStats(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
@@ -27,12 +37,10 @@ func RegisterGetPatternStats(s ToolRegistrar, store *db.Store) {
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		project := req.GetString("project", "")
 
-		stats, err := store.GetPatternStats(project)
+		text, err := RunGetPatternStats(store, project)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get stats: %v", err)), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		text := formatPatternStats(stats)
 		return mcp.NewToolResultText(text), nil
 	})
 }

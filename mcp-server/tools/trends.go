@@ -32,7 +32,7 @@ func RegisterGetHealthTrends(s ToolRegistrar, store *db.Store) {
 		project := req.GetString("project", "")
 		scanType := req.GetString("scan_type", "")
 
-		text, err := handleGetHealthTrends(store, project, scanType)
+		text, err := RunGetHealthTrends(store, project, scanType)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("health trends: %v", err)), nil
 		}
@@ -40,8 +40,11 @@ func RegisterGetHealthTrends(s ToolRegistrar, store *db.Store) {
 	})
 }
 
-// handleGetHealthTrends is the core logic, separated for testability.
-func handleGetHealthTrends(store *db.Store, project, scanType string) (string, error) {
+// RunGetHealthTrends returns a formatted health-trends report for the given
+// project (or all projects if empty). scanType optionally filters to a single
+// scan type (owasp, vuln, lint, full). This is the CLI-callable surface for
+// get_health_trends and is invoked by the go-guardian scan subcommand.
+func RunGetHealthTrends(store *db.Store, project, scanType string) (string, error) {
 	var snapshots []db.ScanSnapshot
 	var err error
 

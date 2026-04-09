@@ -25,6 +25,47 @@ type moduleResult struct {
 	priorDecision *db.DepDecision
 }
 
+// RunCheckDeps analyses the given Go modules for known vulnerabilities and
+// returns a formatted report. Side effects (dep_decisions upsert, scan
+// snapshot insert) match the MCP handler. An input slice whose entries are
+// all empty after trimming returns a neutral
+// "no valid module paths provided" message with a nil error.
+func RunCheckDeps(store *db.Store, modules []string) (string, error) {
+	// Normalize + drop empty entries.
+	normalized := make([]string, 0, len(modules))
+	for _, m := range modules {
+		if s := strings.TrimSpace(m); s != "" {
+			normalized = append(normalized, s)
+		}
+	}
+	if len(normalized) == 0 {
+		return "Dependency Analysis:\n\n(no valid module paths provided)", nil
+	}
+
+	results, err := analyseModules(store, normalized)
+	if err != nil {
+		return "", fmt.Errorf("analysis error: %w", err)
+	}
+
+	for _, r := range results {
+		if r.noCache || r.stale {
+			continue
+		}
+		decision, reason := decisionForResult(r)
+		if uErr := store.UpsertDepDecision(r.module, decision, reason, len(r.cves)); uErr != nil {
+			_ = uErr
+		}
+	}
+
+	totalCVEs := 0
+	for _, r := range results {
+		totalCVEs += len(r.cves)
+	}
+	_ = store.InsertScanSnapshot("vuln", "", totalCVEs, buildVulnSnapshotDetail(results))
+
+	return formatResults(results), nil
+}
+
 // RegisterCheckDeps registers the check_deps MCP tool with the given server.
 func RegisterCheckDeps(s ToolRegistrar, store *db.Store) {
 	tool := mcp.NewTool(
@@ -49,39 +90,16 @@ func RegisterCheckDeps(s ToolRegistrar, store *db.Store) {
 
 		modules := make([]string, 0, len(raw))
 		for _, v := range raw {
-			if modPath, ok := v.(string); ok && strings.TrimSpace(modPath) != "" {
-				modules = append(modules, strings.TrimSpace(modPath))
+			if modPath, ok := v.(string); ok {
+				modules = append(modules, modPath)
 			}
 		}
-		if len(modules) == 0 {
-			return mcp.NewToolResultText("Dependency Analysis:\n\n(no valid module paths provided)"), nil
-		}
 
-		results, err := analyseModules(store, modules)
+		result, err := RunCheckDeps(store, modules)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("analysis error: %v", err)), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		// Persist decisions for every module that has deterministic cache data.
-		for _, r := range results {
-			if r.noCache || r.stale {
-				continue
-			}
-			decision, reason := decisionForResult(r)
-			if uErr := store.UpsertDepDecision(r.module, decision, reason, len(r.cves)); uErr != nil {
-				// Non-fatal: log but do not abort.
-				_ = uErr
-			}
-		}
-
-		// Append trend snapshot for vulnerability findings.
-		totalCVEs := 0
-		for _, r := range results {
-			totalCVEs += len(r.cves)
-		}
-		_ = store.InsertScanSnapshot("vuln", "", totalCVEs, buildVulnSnapshotDetail(results))
-
-		return mcp.NewToolResultText(formatResults(results)), nil
+		return mcp.NewToolResultText(result), nil
 	})
 }
 

@@ -87,9 +87,9 @@ func TestComputeRecurring(t *testing.T) {
 func TestGetHealthTrendsEmpty(t *testing.T) {
 	store := newTestStore(t)
 
-	text, err := handleGetHealthTrends(store, "proj", "")
+	text, err := RunGetHealthTrends(store, "proj", "")
 	if err != nil {
-		t.Fatalf("handleGetHealthTrends: %v", err)
+		t.Fatalf("RunGetHealthTrends: %v", err)
 	}
 	if !strings.Contains(text, "No scan history") {
 		t.Errorf("expected empty-state message, got: %q", text)
@@ -108,9 +108,9 @@ func TestGetHealthTrendsFormatting(t *testing.T) {
 	_ = store.InsertScanSnapshot("owasp", "proj", 3, `{}`)
 	_ = store.InsertScanSnapshot("owasp", "proj", 3, `{}`)
 
-	text, err := handleGetHealthTrends(store, "proj", "")
+	text, err := RunGetHealthTrends(store, "proj", "")
 	if err != nil {
-		t.Fatalf("handleGetHealthTrends: %v", err)
+		t.Fatalf("RunGetHealthTrends: %v", err)
 	}
 
 	// Check key sections present.
@@ -127,9 +127,9 @@ func TestGetHealthTrendsFilterByScanType(t *testing.T) {
 	_ = store.InsertScanSnapshot("lint", "proj", 5, `{}`)
 	_ = store.InsertScanSnapshot("owasp", "proj", 3, `{}`)
 
-	text, err := handleGetHealthTrends(store, "proj", "lint")
+	text, err := RunGetHealthTrends(store, "proj", "lint")
 	if err != nil {
-		t.Fatalf("handleGetHealthTrends: %v", err)
+		t.Fatalf("RunGetHealthTrends: %v", err)
 	}
 
 	if !strings.Contains(text, "lint:") {
