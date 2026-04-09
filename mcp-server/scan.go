@@ -105,19 +105,91 @@ func parseScanArgs(args []string, stderr io.Writer) (scanOptions, int) {
 	return opts, 0
 }
 
-// dispatchScan is the subcommandHandler that implements `go-guardian scan`.
-// This skeleton wires flag parsing + dimension detection only; Task 5 fills
-// in the cache gate and Run* invocations.
+// dispatchScan implements `go-guardian scan`. It parses flag-controlled
+// dimension selection, applies a warm-start cache over the project's
+// *.go files (excluding vendor/), and — on cache miss — runs each requested
+// dimension's Run* helper, writing a markdown findings file per dimension
+// under .go-guardian/. On cache hit the findings files are reused untouched.
 func dispatchScan(args []string, stdout, stderr io.Writer) int {
 	opts, exit := parseScanArgs(args, stderr)
 	if exit != 0 {
 		return exit
 	}
+
+	guardianDir := filepath.Dir(opts.dbPath)
+	if err := os.MkdirAll(guardianDir, 0o700); err != nil {
+		fmt.Fprintf(stderr, "go-guardian scan: mkdir %s: %v\n", guardianDir, err)
+		return 1
+	}
+
+	// Open the store. scan only reads from it (and relies on each Run* helper's
+	// existing side-effects) — no new writes are introduced by this subcommand.
+	store, err := db.NewStore(opts.dbPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian scan: open db %s: %v\n", opts.dbPath, err)
+		return 1
+	}
+	defer store.Close()
+
+	// Compute the current source checksum using the same algorithm as
+	// launcher.sh's source-checksum mechanism (see main.go:computeSourceChecksum).
+	currentChecksum, err := computeSourceChecksum(opts.sourceDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian scan: compute checksum for %s: %v\n", opts.sourceDir, err)
+		return 1
+	}
+
+	savedChecksum, err := readScanChecksum(guardianDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian scan: read .scan-checksum: %v\n", err)
+		return 1
+	}
+
+	expected := expectedOutputFiles(opts.dims)
+
+	if savedChecksum != "" && savedChecksum == currentChecksum && allFilesExist(guardianDir, expected) {
+		fmt.Fprintf(stdout,
+			"go-guardian scan: cached — checksum %s matches and all %d expected file(s) present; reusing %s\n",
+			savedChecksum[:12], len(expected), guardianDir)
+		return 0
+	}
+
+	now := time.Now()
+
+	if opts.dims.owasp {
+		if err := runOwaspDimension(store, opts.sourceDir, guardianDir, currentChecksum, now); err != nil {
+			fmt.Fprintf(stderr, "go-guardian scan: %v\n", err)
+			return 1
+		}
+	}
+	if opts.dims.deps {
+		if err := runDepsDimension(store, opts.sourceDir, guardianDir, currentChecksum, now); err != nil {
+			fmt.Fprintf(stderr, "go-guardian scan: %v\n", err)
+			return 1
+		}
+	}
+	if opts.dims.staleness {
+		if err := runStalenessDimension(store, opts.sourceDir, guardianDir, currentChecksum, now); err != nil {
+			fmt.Fprintf(stderr, "go-guardian scan: %v\n", err)
+			return 1
+		}
+	}
+	if opts.dims.patterns {
+		if err := runPatternsDimension(store, guardianDir, currentChecksum, now); err != nil {
+			fmt.Fprintf(stderr, "go-guardian scan: %v\n", err)
+			return 1
+		}
+	}
+
+	if err := writeScanChecksum(guardianDir, currentChecksum); err != nil {
+		fmt.Fprintf(stderr, "go-guardian scan: write checksum: %v\n", err)
+		return 1
+	}
+
 	fmt.Fprintf(stdout,
-		"go-guardian scan: dimensions=%s db=%s source-dir=%s (skeleton — not wired)\n",
-		strings.Join(opts.dims.enabledList(), ","),
-		opts.dbPath, opts.sourceDir)
-	return 1
+		"go-guardian scan: wrote %d file(s) under %s (dimensions: %s, checksum: %s)\n",
+		len(expected), guardianDir, strings.Join(opts.dims.enabledList(), ","), currentChecksum[:12])
+	return 0
 }
 
 // writeScanOutput writes a findings file with YAML frontmatter followed by
