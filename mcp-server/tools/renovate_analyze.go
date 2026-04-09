@@ -46,6 +46,89 @@ func RegisterAnalyzeRenovateConfig(s ToolRegistrar, store *db.Store) {
 	s.AddTool(tool, handleAnalyzeRenovateConfig(store))
 }
 
+// RunAnalyzeRenovateConfig analyzes a Renovate configuration file against the rule
+// database. It is the package-level entry point used by both the MCP handler and the CLI.
+func RunAnalyzeRenovateConfig(store *db.Store, configPath string) (string, error) {
+	// Read and parse config.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot read config file: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return "", fmt.Errorf("invalid JSON in config: %w", err)
+	}
+
+	// Query rules and preferences.
+	rules, err := store.QueryRenovateRules("")
+	if err != nil {
+		return "", fmt.Errorf("query rules: %w", err)
+	}
+
+	// Preferences are queried for potential future use (e.g., bonus scoring),
+	// but the core analysis is rule-driven.
+	_, err = store.QueryRenovatePreferences("", 100)
+	if err != nil {
+		return "", fmt.Errorf("query preferences: %w", err)
+	}
+
+	// Evaluate each rule against the config.
+	var findings []renovateFinding
+	for _, rule := range rules {
+		if f, violated := evaluateRule(rule, config); violated {
+			findings = append(findings, f)
+		}
+	}
+
+	// Compute score.
+	score := 100
+	for _, f := range findings {
+		if d, ok := renovateSeverityDeduction[f.Severity]; ok {
+			score -= d
+		}
+	}
+	if score < 0 {
+		score = 0
+	}
+
+	// Group findings by severity.
+	grouped := make(map[string][]renovateFinding)
+	for _, f := range findings {
+		grouped[f.Severity] = append(grouped[f.Severity], f)
+	}
+
+	// Format output.
+	var out strings.Builder
+	fmt.Fprintf(&out, "=== Renovate Config Analysis: %s ===\n", configPath)
+	fmt.Fprintf(&out, "Score: %d/100\n", score)
+
+	for _, sev := range renovateSeverityOrder {
+		fs := grouped[sev]
+		if len(fs) == 0 {
+			continue
+		}
+		noun := "findings"
+		if len(fs) == 1 {
+			noun = "finding"
+		}
+		fmt.Fprintf(&out, "\n%s (%d %s):\n", sev, len(fs), noun)
+		for _, f := range fs {
+			fmt.Fprintf(&out, "  [%s] %s — %s\n", f.RuleID, f.Title, f.Description)
+		}
+	}
+
+	// Persist score.
+	findingsJSON, _ := json.Marshal(findings)
+	if err := store.InsertConfigScore(configPath, score, len(findings), string(findingsJSON)); err != nil {
+		fmt.Fprintf(&out, "\nWarning: failed to save score: %v\n", err)
+	} else {
+		fmt.Fprintln(&out, "\nScore saved for trend tracking.")
+	}
+
+	return out.String(), nil
+}
+
 func handleAnalyzeRenovateConfig(store *db.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		configPath, err := request.RequireString("config_path")
@@ -53,84 +136,11 @@ func handleAnalyzeRenovateConfig(store *db.Store) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("config_path is required"), nil
 		}
 
-		// Read and parse config.
-		data, err := os.ReadFile(configPath)
+		result, err := RunAnalyzeRenovateConfig(store, configPath)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("cannot read config file: %v", err)), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		var config map[string]interface{}
-		if err := json.Unmarshal(data, &config); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid JSON in config: %v", err)), nil
-		}
-
-		// Query rules and preferences.
-		rules, err := store.QueryRenovateRules("")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("query rules: %v", err)), nil
-		}
-
-		// Preferences are queried for potential future use (e.g., bonus scoring),
-		// but the core analysis is rule-driven.
-		_, err = store.QueryRenovatePreferences("", 100)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("query preferences: %v", err)), nil
-		}
-
-		// Evaluate each rule against the config.
-		var findings []renovateFinding
-		for _, rule := range rules {
-			if f, violated := evaluateRule(rule, config); violated {
-				findings = append(findings, f)
-			}
-		}
-
-		// Compute score.
-		score := 100
-		for _, f := range findings {
-			if d, ok := renovateSeverityDeduction[f.Severity]; ok {
-				score -= d
-			}
-		}
-		if score < 0 {
-			score = 0
-		}
-
-		// Group findings by severity.
-		grouped := make(map[string][]renovateFinding)
-		for _, f := range findings {
-			grouped[f.Severity] = append(grouped[f.Severity], f)
-		}
-
-		// Format output.
-		var out strings.Builder
-		fmt.Fprintf(&out, "=== Renovate Config Analysis: %s ===\n", configPath)
-		fmt.Fprintf(&out, "Score: %d/100\n", score)
-
-		for _, sev := range renovateSeverityOrder {
-			fs := grouped[sev]
-			if len(fs) == 0 {
-				continue
-			}
-			noun := "findings"
-			if len(fs) == 1 {
-				noun = "finding"
-			}
-			fmt.Fprintf(&out, "\n%s (%d %s):\n", sev, len(fs), noun)
-			for _, f := range fs {
-				fmt.Fprintf(&out, "  [%s] %s — %s\n", f.RuleID, f.Title, f.Description)
-			}
-		}
-
-		// Persist score.
-		findingsJSON, _ := json.Marshal(findings)
-		if err := store.InsertConfigScore(configPath, score, len(findings), string(findingsJSON)); err != nil {
-			fmt.Fprintf(&out, "\nWarning: failed to save score: %v\n", err)
-		} else {
-			fmt.Fprintln(&out, "\nScore saved for trend tracking.")
-		}
-
-		return mcp.NewToolResultText(out.String()), nil
+		return mcp.NewToolResultText(result), nil
 	}
 }
 

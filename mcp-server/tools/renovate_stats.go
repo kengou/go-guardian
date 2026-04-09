@@ -20,97 +20,107 @@ func RegisterGetRenovateStats(s ToolRegistrar, store *db.Store) {
 	s.AddTool(tool, handleGetRenovateStats(store))
 }
 
+// RunGetRenovateStats produces the Renovate dashboard report. It is the
+// package-level entry point used by both the MCP handler and the CLI.
+func RunGetRenovateStats(store *db.Store, configPath string) (string, error) {
+	var out strings.Builder
+
+	fmt.Fprintln(&out, "=== Renovate Guardian Dashboard ===")
+
+	// --- Rule Coverage ---
+	fmt.Fprintln(&out, "\nRule Coverage:")
+
+	totalRules, err := store.TotalRenovateRuleCount()
+	if err != nil {
+		return "", fmt.Errorf("failed to query total rule count: %w", err)
+	}
+	fmt.Fprintf(&out, "  Total rules: %d\n", totalRules)
+
+	catCounts, err := store.RenovateRuleCountByCategory()
+	if err != nil {
+		return "", fmt.Errorf("failed to query rule categories: %w", err)
+	}
+
+	// Sort categories alphabetically for stable output.
+	cats := make([]string, 0, len(catCounts))
+	for cat := range catCounts {
+		cats = append(cats, cat)
+	}
+	sort.Strings(cats)
+
+	// Find the longest category name for alignment (including trailing colon).
+	maxLen := 0
+	for _, cat := range cats {
+		if len(cat)+1 > maxLen {
+			maxLen = len(cat) + 1
+		}
+	}
+
+	for _, cat := range cats {
+		label := cat + ":"
+		fmt.Fprintf(&out, "  %-*s %d rules\n", maxLen, label, catCounts[cat])
+	}
+
+	// --- Learned Preferences ---
+	fmt.Fprintln(&out, "\nLearned Preferences:")
+
+	prefCount, err := store.RenovatePreferenceCount()
+	if err != nil {
+		return "", fmt.Errorf("failed to query preference count: %w", err)
+	}
+	fmt.Fprintf(&out, "  %d total\n", prefCount)
+
+	if prefCount > 0 {
+		topPrefs, err := store.QueryRenovatePreferences("", 5)
+		if err != nil {
+			return "", fmt.Errorf("failed to query preferences: %w", err)
+		}
+		for _, p := range topPrefs {
+			fmt.Fprintf(&out, "  [freq:%d] %s — %s\n", p.Frequency, p.Category, p.Description)
+		}
+	}
+
+	// --- Config Score History ---
+	fmt.Fprintln(&out, "\nConfig Score History:")
+
+	var scores []db.ConfigScore
+	if configPath != "" {
+		scores, err = store.GetConfigScores(configPath, 5)
+		if err != nil {
+			return "", fmt.Errorf("failed to query config scores: %w", err)
+		}
+		if len(scores) > 0 {
+			fmt.Fprintf(&out, "  Path: %s\n", configPath)
+		}
+	} else {
+		scores, err = store.GetRecentConfigScores(5)
+		if err != nil {
+			return "", fmt.Errorf("failed to query recent scores: %w", err)
+		}
+	}
+
+	if len(scores) == 0 {
+		fmt.Fprintln(&out, "  No score history available")
+	} else {
+		for _, sc := range scores {
+			fmt.Fprintf(&out, "  %s: %d/100 (%d findings) [%s]\n",
+				sc.CreatedAt.Format("2006-01-02"), sc.Score, sc.FindingsCount, sc.ConfigPath)
+		}
+		fmt.Fprintf(&out, "  Trend: %s\n", renovateComputeTrend(scores))
+	}
+
+	return out.String(), nil
+}
+
 func handleGetRenovateStats(store *db.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var out strings.Builder
-
-		fmt.Fprintln(&out, "=== Renovate Guardian Dashboard ===")
-
-		// --- Rule Coverage ---
-		fmt.Fprintln(&out, "\nRule Coverage:")
-
-		totalRules, err := store.TotalRenovateRuleCount()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to query total rule count: %v", err)), nil
-		}
-		fmt.Fprintf(&out, "  Total rules: %d\n", totalRules)
-
-		catCounts, err := store.RenovateRuleCountByCategory()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to query rule categories: %v", err)), nil
-		}
-
-		// Sort categories alphabetically for stable output.
-		cats := make([]string, 0, len(catCounts))
-		for cat := range catCounts {
-			cats = append(cats, cat)
-		}
-		sort.Strings(cats)
-
-		// Find the longest category name for alignment (including trailing colon).
-		maxLen := 0
-		for _, cat := range cats {
-			if len(cat)+1 > maxLen {
-				maxLen = len(cat) + 1
-			}
-		}
-
-		for _, cat := range cats {
-			label := cat + ":"
-			fmt.Fprintf(&out, "  %-*s %d rules\n", maxLen, label, catCounts[cat])
-		}
-
-		// --- Learned Preferences ---
-		fmt.Fprintln(&out, "\nLearned Preferences:")
-
-		prefCount, err := store.RenovatePreferenceCount()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to query preference count: %v", err)), nil
-		}
-		fmt.Fprintf(&out, "  %d total\n", prefCount)
-
-		if prefCount > 0 {
-			topPrefs, err := store.QueryRenovatePreferences("", 5)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to query preferences: %v", err)), nil
-			}
-			for _, p := range topPrefs {
-				fmt.Fprintf(&out, "  [freq:%d] %s — %s\n", p.Frequency, p.Category, p.Description)
-			}
-		}
-
-		// --- Config Score History ---
-		fmt.Fprintln(&out, "\nConfig Score History:")
-
 		configPath := request.GetString("config_path", "")
 
-		var scores []db.ConfigScore
-		if configPath != "" {
-			scores, err = store.GetConfigScores(configPath, 5)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to query config scores: %v", err)), nil
-			}
-			if len(scores) > 0 {
-				fmt.Fprintf(&out, "  Path: %s\n", configPath)
-			}
-		} else {
-			scores, err = store.GetRecentConfigScores(5)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to query recent scores: %v", err)), nil
-			}
+		result, err := RunGetRenovateStats(store, configPath)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		if len(scores) == 0 {
-			fmt.Fprintln(&out, "  No score history available")
-		} else {
-			for _, sc := range scores {
-				fmt.Fprintf(&out, "  %s: %d/100 (%d findings) [%s]\n",
-					sc.CreatedAt.Format("2006-01-02"), sc.Score, sc.FindingsCount, sc.ConfigPath)
-			}
-			fmt.Fprintf(&out, "  Trend: %s\n", renovateComputeTrend(scores))
-		}
-
-		return mcp.NewToolResultText(out.String()), nil
+		return mcp.NewToolResultText(result), nil
 	}
 }
 

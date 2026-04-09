@@ -36,6 +36,40 @@ func RegisterLearnRenovatePreference(s ToolRegistrar, store *db.Store) {
 	s.AddTool(tool, handleLearnRenovatePreference(store))
 }
 
+// RunLearnRenovatePreference records a Renovate configuration preference in the database.
+// It is the package-level entry point used by both the MCP handler and the CLI.
+func RunLearnRenovatePreference(store *db.Store, category, description, dontConfig, doConfig string) (string, error) {
+	category = strings.TrimSpace(category)
+	description = strings.TrimSpace(description)
+
+	if category == "" {
+		return "", fmt.Errorf("category is required")
+	}
+	if description == "" {
+		return "", fmt.Errorf("description is required")
+	}
+
+	if !renovateValidCategories[category] {
+		valid := make([]string, 0, len(renovateValidCategories))
+		for k := range renovateValidCategories {
+			valid = append(valid, k)
+		}
+		return "", fmt.Errorf(
+			"invalid category %q — must be one of: %s",
+			category, strings.Join(valid, ", "),
+		)
+	}
+
+	if err := store.InsertRenovatePreference(category, description, dontConfig, doConfig); err != nil {
+		return "", fmt.Errorf("store error: %w", err)
+	}
+
+	return fmt.Sprintf(
+		"Preference learned: [%s] %s (frequency will increment on repeat)",
+		category, description,
+	), nil
+}
+
 func handleLearnRenovatePreference(store *db.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		category := request.GetString("category", "")
@@ -43,34 +77,10 @@ func handleLearnRenovatePreference(store *db.Store) server.ToolHandlerFunc {
 		dontConfig := request.GetString("dont_config", "")
 		doConfig := request.GetString("do_config", "")
 
-		category = strings.TrimSpace(category)
-		description = strings.TrimSpace(description)
-
-		if category == "" {
-			return mcp.NewToolResultError("category is required"), nil
+		result, err := RunLearnRenovatePreference(store, category, description, dontConfig, doConfig)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if description == "" {
-			return mcp.NewToolResultError("description is required"), nil
-		}
-
-		if !renovateValidCategories[category] {
-			valid := make([]string, 0, len(renovateValidCategories))
-			for k := range renovateValidCategories {
-				valid = append(valid, k)
-			}
-			return mcp.NewToolResultError(fmt.Sprintf(
-				"invalid category %q — must be one of: %s",
-				category, strings.Join(valid, ", "),
-			)), nil
-		}
-
-		if err := store.InsertRenovatePreference(category, description, dontConfig, doConfig); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("store error: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(fmt.Sprintf(
-			"Preference learned: [%s] %s (frequency will increment on repeat)",
-			category, description,
-		)), nil
+		return mcp.NewToolResultText(result), nil
 	}
 }

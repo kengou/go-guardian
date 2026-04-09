@@ -67,70 +67,81 @@ func RegisterSuggestRenovateRule(s ToolRegistrar, store *db.Store) {
 	s.AddTool(tool, handleSuggestRenovateRule(store))
 }
 
-func handleSuggestRenovateRule(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		problem := request.GetString("problem", "")
-		if strings.TrimSpace(problem) == "" {
-			return mcp.NewToolResultError("problem is required"), nil
-		}
-		configPath := request.GetString("config_path", "")
+// RunSuggestRenovateRule suggests Renovate configuration rules for a given problem.
+// It is the package-level entry point used by both the MCP handler and the CLI.
+func RunSuggestRenovateRule(store *db.Store, problem, configPath string) (string, error) {
+	if strings.TrimSpace(problem) == "" {
+		return "", fmt.Errorf("problem is required")
+	}
 
-		category := renovateCategoryFromProblem(problem)
+	category := renovateCategoryFromProblem(problem)
 
-		// Collect matching rules from category and keyword search.
-		var rules []db.RenovateRule
-		seen := make(map[string]bool)
+	// Collect matching rules from category and keyword search.
+	var rules []db.RenovateRule
+	seen := make(map[string]bool)
 
-		if category != "" {
-			catRules, err := store.QueryRenovateRules(category)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("query rules: %v", err)), nil
-			}
-			for _, r := range catRules {
-				if !seen[r.RuleID] {
-					seen[r.RuleID] = true
-					rules = append(rules, r)
-				}
-			}
-		}
-
-		searchRules, err := store.SearchRenovateRules(problem, 10)
+	if category != "" {
+		catRules, err := store.QueryRenovateRules(category)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("search rules: %v", err)), nil
+			return "", fmt.Errorf("query rules: %w", err)
 		}
-		for _, r := range searchRules {
+		for _, r := range catRules {
 			if !seen[r.RuleID] {
 				seen[r.RuleID] = true
 				rules = append(rules, r)
 			}
 		}
+	}
 
-		// Query learned preferences.
-		var prefs []db.RenovatePreference
-		if category != "" {
-			prefs, err = store.QueryRenovatePreferences(category, 5)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("query preferences: %v", err)), nil
-			}
+	searchRules, err := store.SearchRenovateRules(problem, 10)
+	if err != nil {
+		return "", fmt.Errorf("search rules: %w", err)
+	}
+	for _, r := range searchRules {
+		if !seen[r.RuleID] {
+			seen[r.RuleID] = true
+			rules = append(rules, r)
 		}
+	}
 
-		if len(rules) == 0 && len(prefs) == 0 {
-			return mcp.NewToolResultText(fmt.Sprintf(
-				"No matching rules found for: %q\nTry different keywords or use query_renovate_knowledge to browse categories.",
-				problem,
-			)), nil
+	// Query learned preferences.
+	var prefs []db.RenovatePreference
+	if category != "" {
+		prefs, err = store.QueryRenovatePreferences(category, 5)
+		if err != nil {
+			return "", fmt.Errorf("query preferences: %w", err)
 		}
+	}
 
-		// Read config file if provided.
-		var configData []byte
-		if configPath != "" {
-			configData, _ = os.ReadFile(configPath)
+	if len(rules) == 0 && len(prefs) == 0 {
+		return fmt.Sprintf(
+			"No matching rules found for: %q\nTry different keywords or use query_renovate_knowledge to browse categories.",
+			problem,
+		), nil
+	}
+
+	// Read config file if provided.
+	var configData []byte
+	if configPath != "" {
+		configData, _ = os.ReadFile(configPath)
+	}
+
+	// Format output: up to 3 results.
+	ruleCount := len(rules)
+	prefCount := len(prefs)
+	return formatRenovateSuggestions(problem, rules, prefs, configData, ruleCount, prefCount), nil
+}
+
+func handleSuggestRenovateRule(store *db.Store) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		problem := request.GetString("problem", "")
+		configPath := request.GetString("config_path", "")
+
+		result, err := RunSuggestRenovateRule(store, problem, configPath)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		// Format output: up to 3 results.
-		ruleCount := len(rules)
-		prefCount := len(prefs)
-		return mcp.NewToolResultText(formatRenovateSuggestions(problem, rules, prefs, configData, ruleCount, prefCount)), nil
+		return mcp.NewToolResultText(result), nil
 	}
 }
 
