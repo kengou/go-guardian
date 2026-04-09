@@ -9,43 +9,18 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// RegisterGetSessionFindings registers the get_session_findings MCP tool.
-// sessionID is captured in the closure so agents don't need to pass it.
-func RegisterGetSessionFindings(s ToolRegistrar, store *db.Store, sessionID string) {
-	tool := mcp.NewTool(
-		"get_session_findings",
-		mcp.WithDescription(
-			"Query findings reported by other agents in the current scan session. "+
-				"Use this to see what other agents have flagged before starting your analysis.",
-		),
-		mcp.WithString("agent",
-			mcp.Description("Filter by reporting agent (e.g. reviewer, security) (optional)"),
-		),
-		mcp.WithString("file_path",
-			mcp.Description("Filter by file path (substring match) (optional)"),
-		),
-		mcp.WithString("finding_type",
-			mcp.Description("Filter by finding type (optional)"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		text, err := handleGetSessionFindings(store, sessionID, req)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("get_session_findings: %v", err)), nil
-		}
-		return mcp.NewToolResultText(text), nil
-	})
-}
-
-func handleGetSessionFindings(store *db.Store, sessionID string, req mcp.CallToolRequest) (string, error) {
+// RunGetSessionFindings queries cross-agent session findings with optional
+// filters on agent, file path (substring), and finding type (case-insensitive).
+// Returns a human-readable block or "No active session..." if sessionID is
+// empty. The returned error is non-nil only on store query failures.
+func RunGetSessionFindings(store *db.Store, sessionID, agent, filePath, findingType string) (string, error) {
 	if sessionID == "" {
 		return "No active session — session findings are only available during a /go scan.", nil
 	}
 
-	agent := strings.TrimSpace(req.GetString("agent", ""))
-	filePath := strings.TrimSpace(req.GetString("file_path", ""))
-	findingType := strings.TrimSpace(req.GetString("finding_type", ""))
+	agent = strings.TrimSpace(agent)
+	filePath = strings.TrimSpace(filePath)
+	findingType = strings.TrimSpace(findingType)
 
 	var findings []db.SessionFinding
 	var err error
@@ -59,7 +34,6 @@ func handleGetSessionFindings(store *db.Store, sessionID string, req mcp.CallToo
 		return "", fmt.Errorf("query: %w", err)
 	}
 
-	// Apply finding_type filter in memory (not a store-level filter).
 	if findingType != "" {
 		filtered := findings[:0]
 		for _, f := range findings {
@@ -88,4 +62,39 @@ func handleGetSessionFindings(store *db.Store, sessionID string, req mcp.CallToo
 	}
 
 	return strings.TrimRight(sb.String(), "\n"), nil
+}
+
+// RegisterGetSessionFindings registers the get_session_findings MCP tool.
+// sessionID is captured in the closure so agents don't need to pass it.
+func RegisterGetSessionFindings(s ToolRegistrar, store *db.Store, sessionID string) {
+	tool := mcp.NewTool(
+		"get_session_findings",
+		mcp.WithDescription(
+			"Query findings reported by other agents in the current scan session. "+
+				"Use this to see what other agents have flagged before starting your analysis.",
+		),
+		mcp.WithString("agent",
+			mcp.Description("Filter by reporting agent (e.g. reviewer, security) (optional)"),
+		),
+		mcp.WithString("file_path",
+			mcp.Description("Filter by file path (substring match) (optional)"),
+		),
+		mcp.WithString("finding_type",
+			mcp.Description("Filter by finding type (optional)"),
+		),
+	)
+
+	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		text, err := RunGetSessionFindings(
+			store,
+			sessionID,
+			req.GetString("agent", ""),
+			req.GetString("file_path", ""),
+			req.GetString("finding_type", ""),
+		)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("get_session_findings: %v", err)), nil
+		}
+		return mcp.NewToolResultText(text), nil
+	})
 }

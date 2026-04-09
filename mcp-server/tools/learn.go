@@ -68,6 +68,59 @@ func RegisterLearnFromLint(s ToolRegistrar, store *db.Store) {
 	s.AddTool(tool, learnFromLintHandler(store))
 }
 
+// RunLearnFromLint parses a unified diff and raw golangci-lint output, stores
+// the resulting patterns, appends a lint scan snapshot, and returns a JSON
+// summary string ({"learned":N,"updated":M,"patterns":[...]}). The behavior
+// exactly matches the MCP learn_from_lint handler.
+func RunLearnFromLint(store *db.Store, diff, lintOutput, project string) (string, error) {
+	if strings.TrimSpace(diff) == "" && strings.TrimSpace(lintOutput) == "" {
+		return `{"learned":0,"updated":0,"patterns":[]}`, nil
+	}
+
+	findings := parseLintOutput(lintOutput)
+	hunks := parseDiff(diff)
+	patterns := matchFindingsToHunks(findings, hunks)
+
+	type patternSummary struct {
+		Rule     string `json:"rule"`
+		FileGlob string `json:"file_glob"`
+	}
+
+	learned := 0
+	updated := 0
+	summaries := make([]patternSummary, 0, len(patterns))
+
+	for _, p := range patterns {
+		if err := store.InsertLintPattern(p.rule, p.fileGlob, p.dontCode, p.doCode, "learned"); err != nil {
+			return "", fmt.Errorf("store error: %w", err)
+		}
+		// InsertLintPattern uses ON CONFLICT … DO UPDATE, so every call
+		// either inserts (learned) or increments frequency (updated).
+		// We approximate: if both code snippets are non-empty it is a
+		// full pattern (learned), otherwise a signal-only pattern (updated).
+		if p.dontCode == "" && p.doCode == "" {
+			updated++
+		} else {
+			learned++
+		}
+		summaries = append(summaries, patternSummary{Rule: p.rule, FileGlob: p.fileGlob})
+	}
+
+	// Append trend snapshot for lint findings.
+	_ = store.InsertScanSnapshot("lint", project, len(findings), buildLintSnapshotDetail(findings))
+
+	result := map[string]interface{}{
+		"learned":  learned,
+		"updated":  updated,
+		"patterns": summaries,
+	}
+	b, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("json encode: %w", err)
+	}
+	return string(b), nil
+}
+
 // learnFromLintHandler returns the ToolHandlerFunc for learn_from_lint.
 // It is a separate function so that tests can call the handler directly
 // without needing a live MCP transport.
@@ -75,56 +128,13 @@ func learnFromLintHandler(store *db.Store) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		diff := req.GetString("diff", "")
 		lintOutput := req.GetString("lint_output", "")
-
-		// Edge case: nothing useful provided.
-		if strings.TrimSpace(diff) == "" && strings.TrimSpace(lintOutput) == "" {
-			return mcp.NewToolResultText(`{"learned":0,"updated":0,"patterns":[]}`), nil
-		}
-
-		findings := parseLintOutput(lintOutput)
-		hunks := parseDiff(diff)
-		patterns := matchFindingsToHunks(findings, hunks)
-
-		type patternSummary struct {
-			Rule     string `json:"rule"`
-			FileGlob string `json:"file_glob"`
-		}
-
-		learned := 0
-		updated := 0
-		summaries := make([]patternSummary, 0, len(patterns))
-
-		for _, p := range patterns {
-			err := store.InsertLintPattern(p.rule, p.fileGlob, p.dontCode, p.doCode, "learned")
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("store error: %v", err)), nil
-			}
-			// InsertLintPattern uses ON CONFLICT … DO UPDATE, so every call
-			// either inserts (learned) or increments frequency (updated).
-			// We approximate: if both code snippets are non-empty it is a
-			// full pattern (learned), otherwise a signal-only pattern (updated).
-			if p.dontCode == "" && p.doCode == "" {
-				updated++
-			} else {
-				learned++
-			}
-			summaries = append(summaries, patternSummary{Rule: p.rule, FileGlob: p.fileGlob})
-		}
-
-		// Append trend snapshot for lint findings.
 		project := req.GetString("project", "")
-		_ = store.InsertScanSnapshot("lint", project, len(findings), buildLintSnapshotDetail(findings))
 
-		result := map[string]interface{}{
-			"learned":  learned,
-			"updated":  updated,
-			"patterns": summaries,
-		}
-		b, err := json.Marshal(result)
+		result, err := RunLearnFromLint(store, diff, lintOutput, project)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("json encode: %v", err)), nil
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText(string(b)), nil
+		return mcp.NewToolResultText(result), nil
 	}
 }
 

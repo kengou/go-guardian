@@ -3,18 +3,14 @@ package tools
 import (
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestGetSessionFindingsEmpty(t *testing.T) {
 	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{}
 
-	text, err := handleGetSessionFindings(store, "sess-100", req)
+	text, err := RunGetSessionFindings(store, "sess-100", "", "", "")
 	if err != nil {
-		t.Fatalf("handleGetSessionFindings: %v", err)
+		t.Fatalf("RunGetSessionFindings: %v", err)
 	}
 	if !strings.Contains(text, "No session findings") {
 		t.Errorf("expected empty message, got: %q", text)
@@ -23,12 +19,10 @@ func TestGetSessionFindingsEmpty(t *testing.T) {
 
 func TestGetSessionFindingsNoSession(t *testing.T) {
 	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{}
 
-	text, err := handleGetSessionFindings(store, "", req)
+	text, err := RunGetSessionFindings(store, "", "", "", "")
 	if err != nil {
-		t.Fatalf("handleGetSessionFindings: %v", err)
+		t.Fatalf("RunGetSessionFindings: %v", err)
 	}
 	if !strings.Contains(text, "No active session") {
 		t.Errorf("expected no-session message, got: %q", text)
@@ -43,12 +37,9 @@ func TestGetSessionFindingsFormatting(t *testing.T) {
 	_, _ = store.InsertSessionFinding(sid, "security", "sql-injection", "db.go", "String concat in query", "CRITICAL")
 	_, _ = store.InsertSessionFinding(sid, "linter", "errcheck", "handler.go", "Unchecked error", "MEDIUM")
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{}
-
-	text, err := handleGetSessionFindings(store, sid, req)
+	text, err := RunGetSessionFindings(store, sid, "", "", "")
 	if err != nil {
-		t.Fatalf("handleGetSessionFindings: %v", err)
+		t.Fatalf("RunGetSessionFindings: %v", err)
 	}
 
 	for _, substr := range []string{
@@ -72,12 +63,9 @@ func TestGetSessionFindingsFilterByAgent(t *testing.T) {
 	_, _ = store.InsertSessionFinding(sid, "reviewer", "bug", "", "Bug found", "MEDIUM")
 	_, _ = store.InsertSessionFinding(sid, "security", "vuln", "", "Vuln found", "HIGH")
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{"agent": "reviewer"}
-
-	text, err := handleGetSessionFindings(store, sid, req)
+	text, err := RunGetSessionFindings(store, sid, "reviewer", "", "")
 	if err != nil {
-		t.Fatalf("handleGetSessionFindings: %v", err)
+		t.Fatalf("RunGetSessionFindings: %v", err)
 	}
 
 	if !strings.Contains(text, "reviewer") {
@@ -95,12 +83,9 @@ func TestGetSessionFindingsFilterByFile(t *testing.T) {
 	_, _ = store.InsertSessionFinding(sid, "reviewer", "bug", "service.go", "Bug in service", "MEDIUM")
 	_, _ = store.InsertSessionFinding(sid, "security", "vuln", "handler.go", "Vuln in handler", "HIGH")
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{"file_path": "service"}
-
-	text, err := handleGetSessionFindings(store, sid, req)
+	text, err := RunGetSessionFindings(store, sid, "", "service", "")
 	if err != nil {
-		t.Fatalf("handleGetSessionFindings: %v", err)
+		t.Fatalf("RunGetSessionFindings: %v", err)
 	}
 
 	if !strings.Contains(text, "service.go") {
@@ -118,12 +103,9 @@ func TestGetSessionFindingsFilterByType(t *testing.T) {
 	_, _ = store.InsertSessionFinding(sid, "reviewer", "race-condition", "", "Race found", "HIGH")
 	_, _ = store.InsertSessionFinding(sid, "linter", "errcheck", "", "Error unchecked", "MEDIUM")
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{"finding_type": "race-condition"}
-
-	text, err := handleGetSessionFindings(store, sid, req)
+	text, err := RunGetSessionFindings(store, sid, "", "", "race-condition")
 	if err != nil {
-		t.Fatalf("handleGetSessionFindings: %v", err)
+		t.Fatalf("RunGetSessionFindings: %v", err)
 	}
 
 	if !strings.Contains(text, "race-condition") {

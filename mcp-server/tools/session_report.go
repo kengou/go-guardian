@@ -9,6 +9,43 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// RunReportFinding records a cross-agent session finding and returns a
+// human-readable acknowledgment. sessionID must be non-empty; callers of the
+// CLI variant will read it from .go-guardian/session-id. severity is
+// normalized to CRITICAL/HIGH/MEDIUM/LOW; unknown or empty values fall back
+// to MEDIUM.
+func RunReportFinding(store *db.Store, sessionID, agent, findingType, filePath, description, severity string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("no active session — findings require a session ID")
+	}
+
+	agent = strings.TrimSpace(agent)
+	findingType = strings.TrimSpace(findingType)
+	description = strings.TrimSpace(description)
+
+	if agent == "" || findingType == "" || description == "" {
+		return "", fmt.Errorf("agent, finding_type, and description are required")
+	}
+
+	filePath = strings.TrimSpace(filePath)
+	severity = strings.ToUpper(strings.TrimSpace(severity))
+	if severity == "" {
+		severity = "MEDIUM"
+	}
+	switch severity {
+	case "CRITICAL", "HIGH", "MEDIUM", "LOW":
+	default:
+		severity = "MEDIUM"
+	}
+
+	id, err := store.InsertSessionFinding(sessionID, agent, findingType, filePath, description, severity)
+	if err != nil {
+		return "", fmt.Errorf("store: %w", err)
+	}
+
+	return fmt.Sprintf("Finding #%d recorded (%s/%s: %s)", id, agent, severity, findingType), nil
+}
+
 // RegisterReportFinding registers the report_finding MCP tool.
 // sessionID is captured in the closure so agents don't need to pass it.
 func RegisterReportFinding(s ToolRegistrar, store *db.Store, sessionID string) {
@@ -39,41 +76,18 @@ func RegisterReportFinding(s ToolRegistrar, store *db.Store, sessionID string) {
 	)
 
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		text, err := handleReportFinding(store, sessionID, req)
+		text, err := RunReportFinding(
+			store,
+			sessionID,
+			req.GetString("agent", ""),
+			req.GetString("finding_type", ""),
+			req.GetString("file_path", ""),
+			req.GetString("description", ""),
+			req.GetString("severity", ""),
+		)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("report_finding: %v", err)), nil
 		}
 		return mcp.NewToolResultText(text), nil
 	})
-}
-
-func handleReportFinding(store *db.Store, sessionID string, req mcp.CallToolRequest) (string, error) {
-	if sessionID == "" {
-		return "", fmt.Errorf("no active session — findings require a session ID")
-	}
-
-	agent := strings.TrimSpace(req.GetString("agent", ""))
-	findingType := strings.TrimSpace(req.GetString("finding_type", ""))
-	description := strings.TrimSpace(req.GetString("description", ""))
-
-	if agent == "" || findingType == "" || description == "" {
-		return "", fmt.Errorf("agent, finding_type, and description are required")
-	}
-
-	filePath := strings.TrimSpace(req.GetString("file_path", ""))
-	severity := strings.ToUpper(strings.TrimSpace(req.GetString("severity", "MEDIUM")))
-
-	validSeverities := map[string]bool{
-		"CRITICAL": true, "HIGH": true, "MEDIUM": true, "LOW": true,
-	}
-	if !validSeverities[severity] {
-		severity = "MEDIUM"
-	}
-
-	id, err := store.InsertSessionFinding(sessionID, agent, findingType, filePath, description, severity)
-	if err != nil {
-		return "", fmt.Errorf("store: %w", err)
-	}
-
-	return fmt.Sprintf("Finding #%d recorded (%s/%s: %s)", id, agent, severity, findingType), nil
 }
