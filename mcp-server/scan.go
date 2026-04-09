@@ -149,3 +149,68 @@ func writeScanOutput(path, scanType, checksum string, generatedAt time.Time, cou
 	}
 	return nil
 }
+
+// scanChecksumFile is the conventional path (relative to the guardian dir)
+// where the warm-start cache stores the last successful source checksum.
+const scanChecksumFile = ".scan-checksum"
+
+// readScanChecksum returns the previously-recorded source checksum, or ""
+// if the file does not exist. A read error other than "not exist" is
+// surfaced so the caller can decide whether to proceed conservatively.
+func readScanChecksum(guardianDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(guardianDir, scanChecksumFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// writeScanChecksum persists the given checksum atomically. Parent directory
+// must already exist.
+func writeScanChecksum(guardianDir, checksum string) error {
+	path := filepath.Join(guardianDir, scanChecksumFile)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(checksum+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write checksum tmp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename checksum: %w", err)
+	}
+	return nil
+}
+
+// expectedOutputFiles returns the .go-guardian file basenames that should
+// exist after a successful scan for the given dimensions. Order is stable.
+func expectedOutputFiles(dims scanDimensions) []string {
+	var out []string
+	if dims.owasp {
+		out = append(out, "owasp-findings.md")
+	}
+	if dims.deps {
+		out = append(out, "dep-vulns.md")
+	}
+	if dims.staleness {
+		out = append(out, "staleness.md")
+	}
+	if dims.patterns {
+		out = append(out, "pattern-stats.md", "health-trends.md", "session-findings.md")
+	}
+	return out
+}
+
+// allFilesExist returns true when every file in names exists under dir.
+// Missing files (ENOENT) return false without error. Other stat errors also
+// return false — a stat failure is treated as "cannot confirm" and therefore
+// triggers a re-scan rather than a silent cache hit.
+func allFilesExist(dir string, names []string) bool {
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return false
+		}
+	}
+	return true
+}

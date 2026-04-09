@@ -86,3 +86,55 @@ func TestParseScanArgs_ComposableFlags(t *testing.T) {
 		t.Errorf("composable flags leaked to other dimensions: %+v", opts.dims)
 	}
 }
+
+func TestReadScanChecksum_MissingReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	got, err := readScanChecksum(dir)
+	if err != nil {
+		t.Fatalf("readScanChecksum on empty dir: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestWriteReadScanChecksum_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeScanChecksum(dir, "abc123"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readScanChecksum(dir)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got != "abc123" {
+		t.Errorf("round-trip mismatch: got %q, want %q", got, "abc123")
+	}
+}
+
+func TestExpectedOutputFiles_AllDimensions(t *testing.T) {
+	files := expectedOutputFiles(scanDimensions{owasp: true, deps: true, staleness: true, patterns: true})
+	want := []string{
+		"owasp-findings.md", "dep-vulns.md", "staleness.md",
+		"pattern-stats.md", "health-trends.md", "session-findings.md",
+	}
+	if len(files) != len(want) {
+		t.Fatalf("got %d files, want %d; got=%v", len(files), len(want), files)
+	}
+	for i, w := range want {
+		if files[i] != w {
+			t.Errorf("pos %d: got %q want %q", i, files[i], w)
+		}
+	}
+}
+
+func TestAllFilesExist(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "a.md"), []byte("a"), 0o600)
+	if !allFilesExist(dir, []string{"a.md"}) {
+		t.Errorf("expected a.md to exist")
+	}
+	if allFilesExist(dir, []string{"a.md", "missing.md"}) {
+		t.Errorf("expected missing.md to fail the check")
+	}
+}
