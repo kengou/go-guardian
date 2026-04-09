@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // scanDimensions captures which scan dimensions the user requested on the CLI.
@@ -114,4 +115,37 @@ func dispatchScan(args []string, stdout, stderr io.Writer) int {
 		strings.Join(opts.dims.enabledList(), ","),
 		opts.dbPath, opts.sourceDir)
 	return 1
+}
+
+// writeScanOutput writes a findings file with YAML frontmatter followed by
+// the body text. It writes atomically (tmp + rename) so a crash mid-write
+// never leaves a half-formed file. Parent directory must already exist.
+//
+// Frontmatter fields:
+//   scan_type       — e.g. "owasp", "deps", "staleness", "pattern-stats"
+//   source_checksum — sha256 over *.go files excluding vendor/
+//   generated_at    — RFC3339 UTC timestamp
+//   count           — finding count (0 is a valid "no findings" result)
+func writeScanOutput(path, scanType, checksum string, generatedAt time.Time, count int, body string) error {
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	fmt.Fprintf(&sb, "scan_type: %s\n", scanType)
+	fmt.Fprintf(&sb, "source_checksum: %s\n", checksum)
+	fmt.Fprintf(&sb, "generated_at: %s\n", generatedAt.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&sb, "count: %d\n", count)
+	sb.WriteString("---\n\n")
+	sb.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		sb.WriteString("\n")
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(sb.String()), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
+	}
+	return nil
 }
