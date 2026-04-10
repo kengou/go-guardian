@@ -132,3 +132,79 @@ func TestParseIngestArgs_ExplicitInboxDir(t *testing.T) {
 		t.Errorf("inboxDir=%q want /elsewhere", opts.inboxDir)
 	}
 }
+
+func TestEnsureInboxDirs(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	if err := ensureInboxDirs(inbox); err != nil {
+		t.Fatalf("ensureInboxDirs: %v", err)
+	}
+	for _, sub := range []string{"", "processed", "failed"} {
+		if _, err := os.Stat(filepath.Join(inbox, sub)); err != nil {
+			t.Errorf("expected %s to exist: %v", sub, err)
+		}
+	}
+}
+
+func TestMoveToProcessed(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	_ = ensureInboxDirs(inbox)
+	src := filepath.Join(inbox, "lint-move.md")
+	if err := os.WriteFile(src, []byte("body"), 0o600); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	if err := moveToProcessed(inbox, src); err != nil {
+		t.Fatalf("moveToProcessed: %v", err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Errorf("expected source removed")
+	}
+	if _, err := os.Stat(filepath.Join(inbox, "processed", "lint-move.md")); err != nil {
+		t.Errorf("expected processed/lint-move.md: %v", err)
+	}
+}
+
+func TestMoveToFailed_PrependsHeader(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	_ = ensureInboxDirs(inbox)
+	src := filepath.Join(inbox, "lint-bad.md")
+	if err := os.WriteFile(src, []byte("original content\n"), 0o600); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	if err := moveToFailed(inbox, src, "parse error: missing kind"); err != nil {
+		t.Fatalf("moveToFailed: %v", err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Errorf("expected source removed")
+	}
+	data, err := os.ReadFile(filepath.Join(inbox, "failed", "lint-bad.md"))
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "<!-- ingest error: parse error: missing kind -->") {
+		t.Errorf("expected error header prefix; got: %q", string(data)[:60])
+	}
+	if !strings.Contains(string(data), "original content") {
+		t.Errorf("expected original content preserved; got: %q", string(data))
+	}
+}
+
+func TestProcessedHasSibling(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	_ = ensureInboxDirs(inbox)
+	src := filepath.Join(inbox, "lint-sib.md")
+	if processedHasSibling(inbox, src) {
+		t.Errorf("expected no sibling for fresh file")
+	}
+	if err := os.WriteFile(
+		filepath.Join(inbox, "processed", "lint-sib.md"),
+		[]byte("already-there"), 0o600); err != nil {
+		t.Fatalf("seed processed sibling: %v", err)
+	}
+	if !processedHasSibling(inbox, src) {
+		t.Errorf("expected sibling present after seeding processed/")
+	}
+}

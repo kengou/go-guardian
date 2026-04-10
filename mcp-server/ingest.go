@@ -215,3 +215,62 @@ func parseInboxFrontmatter(text string) (map[string]string, error) {
 	}
 	return fields, nil
 }
+
+// ensureInboxDirs ensures the inbox dir and its processed/ and failed/
+// subdirs exist. Creates them with mode 0o700 so they are not world-readable.
+func ensureInboxDirs(inboxDir string) error {
+	for _, d := range []string{inboxDir, filepath.Join(inboxDir, "processed"), filepath.Join(inboxDir, "failed")} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return fmt.Errorf("mkdir %s: %w", d, err)
+		}
+	}
+	return nil
+}
+
+// processedHasSibling returns true when a file with the same basename as
+// sourcePath already exists under inboxDir/processed/. Used as the
+// idempotency check: if a sibling exists, the inbox copy is removed without
+// re-parsing or re-inserting.
+func processedHasSibling(inboxDir, sourcePath string) bool {
+	sibling := filepath.Join(inboxDir, "processed", filepath.Base(sourcePath))
+	_, err := os.Stat(sibling)
+	return err == nil
+}
+
+// moveToProcessed atomic-renames sourcePath into inboxDir/processed/<basename>.
+// Parent processed/ dir must already exist (caller's responsibility via
+// ensureInboxDirs).
+func moveToProcessed(inboxDir, sourcePath string) error {
+	dst := filepath.Join(inboxDir, "processed", filepath.Base(sourcePath))
+	if err := os.Rename(sourcePath, dst); err != nil {
+		return fmt.Errorf("rename %s -> %s: %w", sourcePath, dst, err)
+	}
+	return nil
+}
+
+// moveToFailed prepends an error header to the source document and writes
+// the result to inboxDir/failed/<basename>, then removes the inbox source.
+// The write is atomic (tmp + rename) so a crash mid-move never loses the
+// original — if the rename fails, the inbox copy is still there and the
+// next ingest run will retry.
+func moveToFailed(inboxDir, sourcePath, errMsg string) error {
+	orig, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read source for failed move: %w", err)
+	}
+	header := fmt.Sprintf("<!-- ingest error: %s -->\n", strings.ReplaceAll(errMsg, "\n", " "))
+	dst := filepath.Join(inboxDir, "failed", filepath.Base(sourcePath))
+	tmp := dst + ".tmp"
+	combined := append([]byte(header), orig...)
+	if err := os.WriteFile(tmp, combined, 0o600); err != nil {
+		return fmt.Errorf("write failed tmp: %w", err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename failed tmp: %w", err)
+	}
+	if err := os.Remove(sourcePath); err != nil {
+		return fmt.Errorf("remove source after failed move: %w", err)
+	}
+	return nil
+}
