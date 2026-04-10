@@ -99,13 +99,61 @@ func dispatchRenovateValidate(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// dispatchRenovateAnalyze is the skeleton for `renovate analyze`.
-// Wired in Task 3.
+// dispatchRenovateAnalyze implements `go-guardian renovate analyze
+// <config-path>`. It writes the analysis report to
+// .go-guardian/renovate-analysis.md and prints a one-line confirmation to
+// stdout. The underlying Run* helper already persists the config score to
+// the store for trend tracking.
 func dispatchRenovateAnalyze(args []string, stdout, stderr io.Writer) int {
-	_ = args
-	_ = stdout
-	fmt.Fprintln(stderr, "go-guardian renovate analyze: not wired (task 3)")
-	return 1
+	fs := flag.NewFlagSet("renovate analyze", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dbPath := addRenovateCommonFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	positional := fs.Args()
+	if len(positional) != 1 {
+		fmt.Fprintln(stderr, "go-guardian renovate analyze: exactly one positional <config-path> is required")
+		return 2
+	}
+	configPath := positional[0]
+
+	outDir := renovateOutputDir(*dbPath)
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		fmt.Fprintf(stderr, "go-guardian renovate analyze: mkdir %s: %v\n", outDir, err)
+		return 1
+	}
+
+	store, exit := openRenovateStore(*dbPath, stderr, "analyze")
+	if exit != 0 {
+		return exit
+	}
+	defer store.Close()
+
+	body, err := tools.RunAnalyzeRenovateConfig(store, configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian renovate analyze: %v\n", err)
+		return 1
+	}
+
+	artifactPath := filepath.Join(outDir, "renovate-analysis.md")
+	if err := atomicWriteMarkdown(artifactPath, body); err != nil {
+		fmt.Fprintf(stderr, "go-guardian renovate analyze: %v\n", err)
+		return 1
+	}
+
+	// Extract the Score line for the stdout confirmation. The body format is
+	// "=== Renovate Config Analysis: <path> ===\nScore: N/100\n...".
+	scoreLine := ""
+	for _, ln := range strings.Split(body, "\n") {
+		if strings.HasPrefix(ln, "Score:") {
+			scoreLine = " (" + strings.TrimSpace(ln) + ")"
+			break
+		}
+	}
+	fmt.Fprintf(stdout, "go-guardian renovate analyze: wrote %s%s\n", artifactPath, scoreLine)
+	return 0
 }
 
 // dispatchRenovateSuggest is the skeleton for `renovate suggest`.
