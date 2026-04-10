@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
+
+	_ "modernc.org/sqlite"
 )
 
 func writeTestDoc(t *testing.T, dir, name, content string) string {
@@ -206,5 +210,111 @@ func TestProcessedHasSibling(t *testing.T) {
 	}
 	if !processedHasSibling(inbox, src) {
 		t.Errorf("expected sibling present after seeding processed/")
+	}
+}
+
+func newTestStore(t *testing.T) *db.Store {
+	t.Helper()
+	store, err := db.NewStore(filepath.Join(t.TempDir(), "guardian.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestRouteLintDoc(t *testing.T) {
+	store := newTestStore(t)
+	doc := &inboxDoc{
+		kind: "lint",
+		fields: map[string]string{
+			"rule": "errcheck", "file_glob": "*.go",
+			"dont_code": "x", "do_code": "y",
+		},
+	}
+	if err := routeLintDoc(store, doc); err != nil {
+		t.Fatalf("routeLintDoc: %v", err)
+	}
+	_, total, err := store.GetAllLintPatterns("", "", "", "", false, 100, 0)
+	if err != nil {
+		t.Fatalf("GetAllLintPatterns: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 lint pattern, got %d", total)
+	}
+}
+
+func TestRouteLintDoc_MissingFields(t *testing.T) {
+	store := newTestStore(t)
+	doc := &inboxDoc{kind: "lint", fields: map[string]string{"rule": "errcheck"}}
+	if err := routeLintDoc(store, doc); err == nil {
+		t.Errorf("expected error for missing fields")
+	}
+}
+
+func TestRouteReviewDoc(t *testing.T) {
+	store := newTestStore(t)
+	doc := &inboxDoc{
+		kind: "review",
+		fields: map[string]string{
+			"description": "d", "severity": "HIGH", "category": "concurrency",
+			"dont_code": "x", "do_code": "y", "file_path": "a.go",
+		},
+	}
+	if err := routeReviewDoc(store, doc); err != nil {
+		t.Fatalf("routeReviewDoc: %v", err)
+	}
+	patterns, _, err := store.GetAllLintPatterns("", "review", "", "", false, 100, 0)
+	if err != nil {
+		t.Fatalf("GetAllLintPatterns: %v", err)
+	}
+	if len(patterns) == 0 {
+		t.Errorf("expected at least one review pattern")
+	}
+}
+
+func TestRouteFindingDoc(t *testing.T) {
+	store := newTestStore(t)
+	doc := &inboxDoc{
+		kind: "finding",
+		fields: map[string]string{
+			"agent": "reviewer", "finding_type": "race", "description": "d",
+		},
+	}
+	if err := routeFindingDoc(store, "sess-1", doc); err != nil {
+		t.Fatalf("routeFindingDoc: %v", err)
+	}
+	findings, err := store.GetSessionFindings("sess-1", "")
+	if err != nil {
+		t.Fatalf("GetSessionFindings: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Errorf("expected 1 session finding, got %d", len(findings))
+	}
+}
+
+func TestRouteFindingDoc_NoSession(t *testing.T) {
+	store := newTestStore(t)
+	doc := &inboxDoc{
+		kind: "finding",
+		fields: map[string]string{
+			"agent": "reviewer", "finding_type": "race", "description": "d",
+		},
+	}
+	if err := routeFindingDoc(store, "", doc); err == nil {
+		t.Errorf("expected error when sessionID empty")
+	}
+}
+
+func TestRouteRenovatePrefDoc(t *testing.T) {
+	store := newTestStore(t)
+	doc := &inboxDoc{
+		kind: "renovate-pref",
+		fields: map[string]string{
+			"category": "automerge", "description": "auto-merge patch updates",
+		},
+	}
+	if err := routeRenovatePrefDoc(store, doc); err != nil {
+		t.Fatalf("routeRenovatePrefDoc: %v", err)
 	}
 }

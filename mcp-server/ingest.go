@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
+	"github.com/kengou/go-guardian/mcp-server/tools"
 )
 
 // ingestOptions is the parsed CLI flag state for an `ingest` invocation.
@@ -271,6 +274,77 @@ func moveToFailed(inboxDir, sourcePath, errMsg string) error {
 	}
 	if err := os.Remove(sourcePath); err != nil {
 		return fmt.Errorf("remove source after failed move: %w", err)
+	}
+	return nil
+}
+
+// routeLintDoc routes a kind=lint inbox doc into the learning database via
+// store.InsertLintPattern. The source tag is set to "inbox-lint" so admin
+// UI browsing can distinguish ingested lint patterns from the ones produced
+// by the learn_from_lint MCP tool ("learned") or manual seeding ("manual").
+func routeLintDoc(store *db.Store, doc *inboxDoc) error {
+	rule := strings.TrimSpace(doc.fields["rule"])
+	fileGlob := strings.TrimSpace(doc.fields["file_glob"])
+	dontCode := doc.fields["dont_code"]
+	doCode := doc.fields["do_code"]
+	if rule == "" || fileGlob == "" || dontCode == "" || doCode == "" {
+		return fmt.Errorf("lint doc missing required fields (rule, file_glob, dont_code, do_code)")
+	}
+	if err := store.InsertLintPattern(rule, fileGlob, dontCode, doCode, "inbox-lint"); err != nil {
+		return fmt.Errorf("insert lint pattern: %w", err)
+	}
+	return nil
+}
+
+// routeReviewDoc routes a kind=review inbox doc via tools.RunLearnFromReview,
+// which already handles HIGH/CRITICAL anti-pattern creation and file_glob
+// derivation from file_path.
+func routeReviewDoc(store *db.Store, doc *inboxDoc) error {
+	description := strings.TrimSpace(doc.fields["description"])
+	severity := strings.TrimSpace(doc.fields["severity"])
+	category := strings.TrimSpace(doc.fields["category"])
+	dontCode := doc.fields["dont_code"]
+	doCode := doc.fields["do_code"]
+	filePath := strings.TrimSpace(doc.fields["file_path"])
+	if description == "" || severity == "" || category == "" || dontCode == "" || doCode == "" {
+		return fmt.Errorf("review doc missing required fields (description, severity, category, dont_code, do_code)")
+	}
+	if _, err := tools.RunLearnFromReview(store, description, severity, category, dontCode, doCode, filePath); err != nil {
+		return fmt.Errorf("learn from review: %w", err)
+	}
+	return nil
+}
+
+// routeFindingDoc routes a kind=finding inbox doc via tools.RunReportFinding.
+// sessionID must be non-empty — RunReportFinding enforces this and returns a
+// clear error if not, which the dispatcher surfaces via the failed/ path.
+func routeFindingDoc(store *db.Store, sessionID string, doc *inboxDoc) error {
+	agent := strings.TrimSpace(doc.fields["agent"])
+	findingType := strings.TrimSpace(doc.fields["finding_type"])
+	description := strings.TrimSpace(doc.fields["description"])
+	filePath := strings.TrimSpace(doc.fields["file_path"])
+	severity := strings.TrimSpace(doc.fields["severity"])
+	if agent == "" || findingType == "" || description == "" {
+		return fmt.Errorf("finding doc missing required fields (agent, finding_type, description)")
+	}
+	if _, err := tools.RunReportFinding(store, sessionID, agent, findingType, filePath, description, severity); err != nil {
+		return fmt.Errorf("report finding: %w", err)
+	}
+	return nil
+}
+
+// routeRenovatePrefDoc routes a kind=renovate-pref inbox doc via
+// tools.RunLearnRenovatePreference.
+func routeRenovatePrefDoc(store *db.Store, doc *inboxDoc) error {
+	category := strings.TrimSpace(doc.fields["category"])
+	description := strings.TrimSpace(doc.fields["description"])
+	dontConfig := doc.fields["dont_config"]
+	doConfig := doc.fields["do_config"]
+	if category == "" || description == "" {
+		return fmt.Errorf("renovate-pref doc missing required fields (category, description)")
+	}
+	if _, err := tools.RunLearnRenovatePreference(store, category, description, dontConfig, doConfig); err != nil {
+		return fmt.Errorf("learn renovate preference: %w", err)
 	}
 	return nil
 }
