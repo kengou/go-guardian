@@ -392,7 +392,7 @@ var subcommandRegistry = map[string]subcommandHandler{
 	"scan":        dispatchScan,
 	"ingest":      dispatchIngest,
 	"renovate":    dispatchRenovate,
-	"admin":       dispatchPlaceholderFor("admin", "admin-cli (wave 2)"),
+	"admin":       dispatchAdmin,
 }
 
 // subcommandDescriptions backs the --help listing. Keys must mirror
