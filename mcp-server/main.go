@@ -390,7 +390,7 @@ var subcommandRegistry = map[string]subcommandHandler{
 	"help":        dispatchHelp,
 	"healthcheck": dispatchHealthcheck,
 	"scan":        dispatchScan,
-	"ingest":      dispatchPlaceholderFor("ingest", "inbox-ingest (wave 2)"),
+	"ingest":      dispatchIngest,
 	"renovate":    dispatchPlaceholderFor("renovate", "renovate-cli-pack (wave 2)"),
 	"admin":       dispatchPlaceholderFor("admin", "admin-cli (wave 2)"),
 }
