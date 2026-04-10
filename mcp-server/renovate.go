@@ -57,13 +57,46 @@ func printRenovateVerbListing(w io.Writer) {
 	fmt.Fprintln(w, "  stats    [--config <path>]      Print the renovate dashboard (stdout)")
 }
 
-// dispatchRenovateValidate is the skeleton for `renovate validate`.
-// Wired in Task 2.
+// dispatchRenovateValidate implements `go-guardian renovate validate
+// <config-path>`. It prints the validator's report to stdout and exits
+// non-zero if the report contains any "✗ ERR:" markers. The validator
+// itself never returns an error — all failure modes are encoded in the body.
 func dispatchRenovateValidate(args []string, stdout, stderr io.Writer) int {
-	_ = args
-	_ = stdout
-	fmt.Fprintln(stderr, "go-guardian renovate validate: not wired (task 2)")
-	return 1
+	fs := flag.NewFlagSet("renovate validate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dbPath := addRenovateCommonFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	positional := fs.Args()
+	if len(positional) != 1 {
+		fmt.Fprintln(stderr, "go-guardian renovate validate: exactly one positional <config-path> is required")
+		return 2
+	}
+	configPath := positional[0]
+
+	store, exit := openRenovateStore(*dbPath, stderr, "validate")
+	if exit != 0 {
+		return exit
+	}
+	defer store.Close()
+
+	body, err := tools.RunValidateRenovateConfig(store, configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian renovate validate: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprint(stdout, body)
+	if !strings.HasSuffix(body, "\n") {
+		fmt.Fprintln(stdout)
+	}
+
+	if strings.Contains(body, "✗ ERR:") {
+		return 1
+	}
+	return 0
 }
 
 // dispatchRenovateAnalyze is the skeleton for `renovate analyze`.
@@ -150,6 +183,3 @@ func atomicWriteMarkdown(path string, body string) error {
 	return nil
 }
 
-// Package-internal sentinel used to satisfy the import of tools before any
-// verb is wired. Removed once Task 2 introduces the first real call.
-var _ = tools.RunValidateRenovateConfig
