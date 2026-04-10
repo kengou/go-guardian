@@ -12,7 +12,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,7 +47,6 @@ func main() {
 	projectDir := flag.String("project", "", "project root for scan path validation (defaults to directory of --db)")
 
 	// Runtime toggles for MCP server mode.
-	noAdmin := flag.Bool("no-admin", false, "disable admin UI HTTP server even if GO_GUARDIAN_ADMIN_PORT is set")
 	noPrefetch := flag.Bool("no-prefetch", false, "disable background CVE prefetch on startup")
 	auditLog := flag.Bool("audit-log", false, "enable MCP request audit logging to mcp_requests table (always on when admin UI is active)")
 	debug := flag.Bool("debug", false, "enable debug logging: log every MCP request/response to a file next to the DB")
@@ -215,36 +213,6 @@ func main() {
 		}
 	}
 
-	// ── Admin UI: start HTTP server if GO_GUARDIAN_ADMIN_PORT is set ──────
-	adminPort := os.Getenv("GO_GUARDIAN_ADMIN_PORT")
-	if *noAdmin {
-		adminPort = ""
-	}
-	if adminPort != "" {
-		// Prune old MCP request log entries (>7 days).
-		if pruned, err := store.PruneMCPRequests(7 * 24 * time.Hour); err != nil {
-			log.Printf("warning: prune mcp_requests failed: %v", err)
-		} else if pruned > 0 {
-			log.Printf("admin: pruned %d old request log entries", pruned)
-		}
-
-		// Serve the embedded frontend from admin/ui/dist.
-		staticFS, err := fs.Sub(admin.UIAssets, "ui/dist")
-		if err != nil {
-			log.Printf("warning: admin UI assets not available: %v", err)
-		} else {
-			adminSrv := admin.New(store, staticFS, sessionID,
-				admin.WithPrefetchStatus(prefetchStatus))
-			addr := "127.0.0.1:" + adminPort
-			go func() {
-				log.Printf("admin UI: http://%s", addr)
-				if err := adminSrv.ListenAndServe(addr); err != nil && err != http.ErrServerClosed {
-					log.Printf("admin server error: %v", err)
-				}
-			}()
-		}
-	}
-
 	// Background CVE prefetch: populate vuln_cache so the admin UI and
 	// check_deps have data. Runs once on startup and then daily.
 	runPrefetch := func() {
@@ -288,11 +256,11 @@ func main() {
 	s := server.NewMCPServer("go-guardian", version)
 
 	// Audit/debug logging: wrap tool registration to log invocations.
-	enableAudit := *auditLog || adminPort != ""
+	enableAudit := *auditLog
 	var reg tools.ToolRegistrar = s
 	if enableAudit || *debug {
 		reg = &loggingRegistrar{inner: s, store: store, dbLog: enableAudit, debugLog: *debug}
-		if enableAudit && adminPort == "" {
+		if enableAudit {
 			if pruned, err := store.PruneMCPRequests(7 * 24 * time.Hour); err != nil {
 				log.Printf("warning: prune mcp_requests failed: %v", err)
 			} else if pruned > 0 {
@@ -479,18 +447,6 @@ func runHealthcheckOn(dbPath string, stdout, stderr io.Writer) int {
 	}()
 
 	return runHealthcheck(dbPath)
-}
-
-// dispatchPlaceholderFor returns a subcommandHandler for subcommands not yet
-// implemented in this wave. It prints a clear "not yet implemented" message
-// naming which wave-2 feature will add the real handler, then exits 1.
-func dispatchPlaceholderFor(name, feature string) subcommandHandler {
-	return func(_ []string, _, stderr io.Writer) int {
-		fmt.Fprintf(stderr,
-			"go-guardian %s: not yet implemented in this build — will be added in the %s feature\n",
-			name, feature)
-		return 1
-	}
 }
 
 // isSubcommandInvocation returns true when the process was invoked with a
