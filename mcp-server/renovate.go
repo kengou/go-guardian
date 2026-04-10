@@ -205,13 +205,42 @@ func dispatchRenovateSuggest(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// dispatchRenovateQuery is the skeleton for `renovate query`.
-// Wired in Task 5.
+// dispatchRenovateQuery implements `go-guardian renovate query
+// [--category <cat>] [--keyword <kw>]`. It prints the knowledge-base
+// response to stdout in a form the /renovate skill can consume. Both
+// filters are optional; omitting both returns everything (bounded by the
+// Run* helper's internal limit).
 func dispatchRenovateQuery(args []string, stdout, stderr io.Writer) int {
-	_ = args
-	_ = stdout
-	fmt.Fprintln(stderr, "go-guardian renovate query: not wired (task 5)")
-	return 1
+	fs := flag.NewFlagSet("renovate query", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dbPath := addRenovateCommonFlags(fs)
+	category := fs.String("category", "", "filter by rule category (automerge, grouping, scheduling, security, custom_datasources, automation)")
+	keyword := fs.String("keyword", "", "free-text search across rule titles, descriptions, and learned preference descriptions")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if len(fs.Args()) != 0 {
+		fmt.Fprintln(stderr, "go-guardian renovate query: unexpected positional arguments")
+		return 2
+	}
+
+	store, exit := openRenovateStore(*dbPath, stderr, "query")
+	if exit != 0 {
+		return exit
+	}
+	defer store.Close()
+
+	body, err := tools.RunQueryRenovateKnowledge(store, *category, *keyword)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian renovate query: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprint(stdout, body)
+	if !strings.HasSuffix(body, "\n") {
+		fmt.Fprintln(stdout)
+	}
+	return 0
 }
 
 // dispatchRenovateStats is the skeleton for `renovate stats`.
