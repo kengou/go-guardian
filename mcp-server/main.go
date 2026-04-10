@@ -48,7 +48,7 @@ func main() {
 
 	// Runtime toggles for MCP server mode.
 	noPrefetch := flag.Bool("no-prefetch", false, "disable background CVE prefetch on startup")
-	auditLog := flag.Bool("audit-log", false, "enable MCP request audit logging to mcp_requests table (always on when admin UI is active)")
+	auditLog := flag.Bool("audit-log", false, "enable MCP request audit logging to mcp_requests table")
 	debug := flag.Bool("debug", false, "enable debug logging: log every MCP request/response to a file next to the DB")
 	logFile := flag.String("log-file", "", "path to debug log file (defaults to <db-dir>/guardian.log)")
 
