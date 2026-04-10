@@ -52,17 +52,142 @@ func parseIngestArgs(args []string, stderr io.Writer) (ingestOptions, int) {
 	return opts, 0
 }
 
-// dispatchIngest implements `go-guardian ingest`. Skeleton only — Task 5
-// replaces the body with the full parse → route → move pipeline.
+// dispatchIngest implements `go-guardian ingest`. It reads
+// .go-guardian/inbox/*.md non-recursively, parses each document's YAML
+// frontmatter, routes by `kind` to the appropriate store method, and moves
+// the processed document into .go-guardian/inbox/processed/. Malformed
+// documents are moved to .go-guardian/inbox/failed/ with a <!-- ingest
+// error: ... --> header prepended so siblings are never blocked by one bad
+// file. Running twice on the same inbox state is a no-op: documents whose
+// basename already exists under processed/ are removed from the inbox
+// without re-parsing.
 func dispatchIngest(args []string, stdout, stderr io.Writer) int {
 	opts, exit := parseIngestArgs(args, stderr)
 	if exit != 0 {
 		return exit
 	}
-	_ = opts
-	_ = stdout
-	fmt.Fprintln(stderr, "go-guardian ingest: skeleton — not wired (Task 1)")
-	return 1
+
+	// Resolve session ID: explicit --session-id flag > env var >
+	// <db-dir>/session-id file > empty. Empty is permitted — only finding
+	// docs require it, and they fail through the failed/ path if empty.
+	sessionID := opts.sessionID
+	if sessionID == "" {
+		sessionID = os.Getenv("GO_GUARDIAN_SESSION_ID")
+	}
+	if sessionID == "" {
+		sidPath := filepath.Join(filepath.Dir(opts.dbPath), "session-id")
+		if data, err := os.ReadFile(sidPath); err == nil {
+			sessionID = strings.TrimSpace(string(data))
+		}
+	}
+
+	if err := ensureInboxDirs(opts.inboxDir); err != nil {
+		fmt.Fprintf(stderr, "go-guardian ingest: %v\n", err)
+		return 1
+	}
+
+	// Non-recursive glob: direct children of inboxDir only. processed/ and
+	// failed/ are subdirs and therefore excluded.
+	entries, err := os.ReadDir(opts.inboxDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian ingest: read inbox: %v\n", err)
+		return 1
+	}
+	var docs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		docs = append(docs, filepath.Join(opts.inboxDir, e.Name()))
+	}
+
+	if len(docs) == 0 {
+		fmt.Fprintln(stdout, "go-guardian ingest: nothing to ingest (empty inbox)")
+		return 0
+	}
+
+	// Open the store once and reuse across all docs.
+	store, err := db.NewStore(opts.dbPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "go-guardian ingest: open db %s: %v\n", opts.dbPath, err)
+		return 1
+	}
+	defer store.Close()
+
+	counts := map[string]int{
+		"lint":          0,
+		"review":        0,
+		"finding":       0,
+		"renovate-pref": 0,
+	}
+	failedCount := 0
+	skippedCount := 0
+
+	for _, src := range docs {
+		// Idempotency check: if processed/ already has this basename, remove
+		// the inbox copy without re-parsing. This handles the "drop the same
+		// file twice" and "the hook re-ran with a stale copy" cases.
+		if processedHasSibling(opts.inboxDir, src) {
+			if err := os.Remove(src); err != nil {
+				fmt.Fprintf(stderr, "go-guardian ingest: idempotent skip failed to remove %s: %v\n", src, err)
+			}
+			skippedCount++
+			continue
+		}
+
+		doc, err := parseInboxDoc(src)
+		if err != nil {
+			if mErr := moveToFailed(opts.inboxDir, src, fmt.Sprintf("parse: %v", err)); mErr != nil {
+				fmt.Fprintf(stderr, "go-guardian ingest: parse error AND move-to-failed failed for %s: %v (move err: %v)\n", src, err, mErr)
+			}
+			failedCount++
+			continue
+		}
+
+		var routeErr error
+		switch doc.kind {
+		case "lint":
+			routeErr = routeLintDoc(store, doc)
+		case "review":
+			routeErr = routeReviewDoc(store, doc)
+		case "finding":
+			routeErr = routeFindingDoc(store, sessionID, doc)
+		case "renovate-pref":
+			routeErr = routeRenovatePrefDoc(store, doc)
+		default:
+			routeErr = fmt.Errorf("unknown kind %q", doc.kind)
+		}
+
+		if routeErr != nil {
+			if mErr := moveToFailed(opts.inboxDir, src, fmt.Sprintf("route: %v", routeErr)); mErr != nil {
+				fmt.Fprintf(stderr, "go-guardian ingest: route error AND move-to-failed failed for %s: %v (move err: %v)\n", src, routeErr, mErr)
+			}
+			failedCount++
+			continue
+		}
+
+		if err := moveToProcessed(opts.inboxDir, src); err != nil {
+			fmt.Fprintf(stderr, "go-guardian ingest: move-to-processed failed for %s: %v\n", src, err)
+			// The DB insert already happened; we count it as processed but
+			// report the move failure so the operator can clean up manually.
+		}
+		counts[doc.kind]++
+	}
+
+	total := counts["lint"] + counts["review"] + counts["finding"] + counts["renovate-pref"]
+	if total == 0 && failedCount == 0 && skippedCount > 0 {
+		fmt.Fprintf(stdout,
+			"go-guardian ingest: nothing new — %d document(s) already processed (idempotent skip)\n",
+			skippedCount)
+		return 0
+	}
+	fmt.Fprintf(stdout,
+		"go-guardian ingest: processed %d document(s) — lint: %d, review: %d, finding: %d, renovate-pref: %d (%d failed)\n",
+		total, counts["lint"], counts["review"], counts["finding"], counts["renovate-pref"], failedCount)
+	return 0
 }
 
 // inboxDoc is a parsed agent-inbox markdown document. fields holds the
