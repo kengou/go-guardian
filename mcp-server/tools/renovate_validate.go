@@ -3,7 +3,6 @@ package tools
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // deprecatedOptions maps deprecated Renovate option names to their recommended replacements.
@@ -24,83 +21,69 @@ var deprecatedOptions = map[string]string{
 	"unpublishSafe":         "use 'extends: [\"npm:unpublishSafe\"]' instead",
 }
 
-// RegisterValidateRenovateConfig registers the validate_renovate_config tool on the MCP server.
-func RegisterValidateRenovateConfig(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("validate_renovate_config",
-		mcp.WithDescription("Validate a Renovate JSON configuration file. Checks syntax, deprecated options, structure, and optionally runs a dry-run if RENOVATE_TOKEN is set."),
-		mcp.WithString("config_path", mcp.Required(), mcp.Description("Path to the Renovate JSON configuration file to validate")),
-	)
-	s.AddTool(tool, handleValidateRenovateConfig(store))
-}
+// RunValidateRenovateConfig validates a Renovate configuration file. It is the
+// package-level entry point used by the CLI.
+func RunValidateRenovateConfig(store *db.Store, configPath string) (string, error) {
+	var out strings.Builder
+	var warnings, errs int
 
-func handleValidateRenovateConfig(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		configPath, err := request.RequireString("config_path")
-		if err != nil {
-			return mcp.NewToolResultError("config_path is required"), nil
-		}
+	fmt.Fprintf(&out, "=== Renovate Config Validation: %s ===\n\n", configPath)
+	fmt.Fprintln(&out, "Pass 1: Local Validation")
 
-		var out strings.Builder
-		var warnings, errs int
-
-		fmt.Fprintf(&out, "=== Renovate Config Validation: %s ===\n\n", configPath)
-		fmt.Fprintln(&out, "Pass 1: Local Validation")
-
-		// Read the file.
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("cannot read config file: %v", err)), nil
-		}
-
-		// Parse JSON.
-		var raw any
-		if err := json.Unmarshal(data, &raw); err != nil {
-			var syntaxErr *json.SyntaxError
-			if errors.As(err, &syntaxErr) {
-				line, col := positionFromOffset(data, syntaxErr.Offset)
-				fmt.Fprintf(&out, "✗ ERR: Invalid JSON syntax at line %d, column %d: %s\n", line, col, syntaxErr.Error())
-			} else {
-				fmt.Fprintf(&out, "✗ ERR: Invalid JSON: %s\n", err.Error())
-			}
-			errs++
-			fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
-			return mcp.NewToolResultText(out.String()), nil
-		}
-		fmt.Fprintln(&out, "✓ Valid JSON syntax")
-
-		// Top-level must be a JSON object.
-		rootMap, ok := raw.(map[string]any)
-		if !ok {
-			fmt.Fprintln(&out, "✗ ERR: Top-level value must be a JSON object")
-			errs++
-			fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
-			return mcp.NewToolResultText(out.String()), nil
-		}
-
-		// Check deprecated options.
-		w := checkDeprecatedOptions(rootMap, &out)
-		warnings += w
-
-		// Validate structure.
-		e, w2 := validateStructure(rootMap, &out)
-		errs += e
-		warnings += w2
-
-		if errs == 0 && warnings == 0 {
-			fmt.Fprintln(&out, "✓ Structure valid")
-		} else if errs == 0 {
-			fmt.Fprintln(&out, "✓ Structure valid (with warnings)")
-		}
-
-		// Pass 2: Dry-run.
-		fmt.Fprintln(&out, "\nPass 2: Dry Run")
-		dw, de := runDryRun(configPath, &out)
-		warnings += dw
-		errs += de
-
-		fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
-		return mcp.NewToolResultText(out.String()), nil
+	// Read the file.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot read config file: %w", err)
 	}
+
+	// Parse JSON.
+	var raw any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			line, col := positionFromOffset(data, syntaxErr.Offset)
+			fmt.Fprintf(&out, "✗ ERR: Invalid JSON syntax at line %d, column %d: %s\n", line, col, syntaxErr.Error())
+		} else {
+			fmt.Fprintf(&out, "✗ ERR: Invalid JSON: %s\n", err.Error())
+		}
+		errs++
+		fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
+		return out.String(), nil
+	}
+	fmt.Fprintln(&out, "✓ Valid JSON syntax")
+
+	// Top-level must be a JSON object.
+	rootMap, ok := raw.(map[string]any)
+	if !ok {
+		fmt.Fprintln(&out, "✗ ERR: Top-level value must be a JSON object")
+		errs++
+		fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
+		return out.String(), nil
+	}
+
+	// Check deprecated options.
+	w := checkDeprecatedOptions(rootMap, &out)
+	warnings += w
+
+	// Validate structure.
+	e, w2 := validateStructure(rootMap, &out)
+	errs += e
+	warnings += w2
+
+	if errs == 0 && warnings == 0 {
+		fmt.Fprintln(&out, "✓ Structure valid")
+	} else if errs == 0 {
+		fmt.Fprintln(&out, "✓ Structure valid (with warnings)")
+	}
+
+	// Pass 2: Dry-run.
+	fmt.Fprintln(&out, "\nPass 2: Dry Run")
+	dw, de := runDryRun(configPath, &out)
+	warnings += dw
+	errs += de
+
+	fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
+	return out.String(), nil
 }
 
 // positionFromOffset converts a byte offset into a 1-based line and column.

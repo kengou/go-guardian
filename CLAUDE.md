@@ -13,24 +13,30 @@ Every tool in this workflow owns a distinct layer. Do not duplicate work across 
 | Lifecycle | beastmode (`/plan`, `/implement`, `/validate`) | Feature planning, task breakdown, implementation orchestration, release |
 | Parallelism | agent-teams (`/team-spawn`, `/team-review`) | Spawning parallel agents, coordinating workstreams, synthesising multi-agent results |
 | Broad security | security-scanning (`security-auditor`) | Threat modeling, compliance frameworks, auth architecture, supply chain, cloud security |
-| Go domain + memory | go-guardian (`/go`, `go-guardian:*` agents) | Go-specific code review, OWASP A01-A10 pattern matching, CVE dependency scanning, learned patterns, Dockerfile/Helm/K8s resource patterns |
-| Dependency management | go-guardian (`/renovate`, `go-guardian:advisor`) | Renovate config analysis, scoring, suggestions, learning, custom datasource guidance |
+| Go domain + memory | go-guardian (`/go`, `go-guardian:*` agents) | Go-specific CLI (`go-guardian scan`, `ingest`, `renovate`, `admin`, `healthcheck`), learned-pattern read path (`query_knowledge`, `suggest_fix` MCP tools), and the inbox-based learning loop (`.go-guardian/inbox/` ingested at session end) |
+| Dependency management | go-guardian (`go-guardian renovate <verb>`, `go-guardian:advisor`) | Renovate config analysis, scoring, suggestions, and learning via the `renovate` CLI subcommand and `.go-guardian/inbox/renovate-*.md` preference files |
 | Observability | newrelic-dashboards (`/newrelic`) | New Relic dashboards, NRQL queries, live metric analysis, incident response, alert config |
 
 ## MCP Tool Ownership
 
-`mcp__go-guardian__*` tools are **exclusively** called by `go-guardian:*` agents.
+Only two MCP tools remain after the v0.4.0 cutover: `query_knowledge` and `suggest_fix`. Everything
+that used to be a tool call is now a CLI subcommand (`go-guardian scan|ingest|renovate|admin|healthcheck`)
+whose output is written to `.go-guardian/` files and picked up by the Stop-hook ingest loop from
+`.go-guardian/inbox/`. Agents read findings from those files and write new findings back to the inbox —
+there are no per-finding MCP calls. `mcp__go-guardian__*` tool calls remain **exclusive** to
+`go-guardian:*` agents.
 
-- `go-guardian:reviewer` — `query_knowledge`, `get_pattern_stats`, `learn_from_review`, `report_finding`, `suggest_fix`
-- `go-guardian:security` — `check_owasp`, `check_deps`, `check_staleness`, `get_pattern_stats`, `report_finding`, `get_session_findings`
-- `go-guardian:linter` — `learn_from_lint`, `query_knowledge`, `get_pattern_stats`, `report_finding`
-- `go-guardian:tester` — `query_knowledge`, `get_session_findings`
-- `go-guardian:patterns` — `query_knowledge`, `get_pattern_stats`, `get_health_trends`, `suggest_fix`
-- `go-guardian:orchestrator` — `query_knowledge`, `check_staleness`, `get_pattern_stats`, `get_health_trends`
-- `go-guardian:advisor` — `validate_renovate_config`, `analyze_renovate_config`, `suggest_renovate_rule`, `learn_renovate_preference`, `query_renovate_knowledge`, `get_renovate_stats`
+- `go-guardian:reviewer` — `query_knowledge`, `suggest_fix` (CLI: reads `.go-guardian/pattern-stats.md`; writes `.go-guardian/inbox/review-*.md`)
+- `go-guardian:security` — `query_knowledge` (CLI: reads `.go-guardian/owasp-findings.md`, `.go-guardian/dep-vulns.md`, `.go-guardian/staleness.md`; delegates HIGH/CRITICAL to `/team-spawn security`; writes enriched findings to `.go-guardian/inbox/security-*.md`)
+- `go-guardian:linter` — `query_knowledge` (CLI: reads `.go-guardian/lint-report.md`; writes `.go-guardian/inbox/lint-*.md` after fixes are accepted)
+- `go-guardian:tester` — `query_knowledge` (CLI: reads `.go-guardian/test-report.md` and `.go-guardian/inbox/` for cross-agent findings on the files under test)
+- `go-guardian:patterns` — `query_knowledge`, `suggest_fix` (CLI: reads `.go-guardian/pattern-stats.md` and `.go-guardian/health-trends.md`)
+- `go-guardian:orchestrator` — `query_knowledge` (CLI: reads `.go-guardian/staleness.md`, `.go-guardian/pattern-stats.md`, `.go-guardian/health-trends.md` before dispatching sub-agents)
+- `go-guardian:advisor` — `query_knowledge` (CLI: `go-guardian renovate validate|analyze|suggest|query|stats`; writes `.go-guardian/inbox/renovate-*.md` for preference learning)
 
 No other agent (team-reviewer, security-auditor, team-lead, etc.) should attempt go-guardian MCP tool calls.
-The learning loop only works if go-guardian:* agents are the ones calling these tools.
+The learning loop only works if go-guardian:* agents are the ones calling these tools and writing to
+`.go-guardian/inbox/` for the Stop-hook to ingest.
 
 `mcp__newrelic__*` tools are **exclusively** called by the `newrelic-dashboards` agent.
 - `newrelic-dashboards` — all 27 New Relic MCP tools (discovery, data-access, alerting, performance-analytics, incident-response)
@@ -67,8 +73,8 @@ Need to run multiple independent agents in parallel?
 
 ## Operating Principles
 
-1. **No duplicate checks** — if go-guardian:security already ran check_owasp, don't re-run it in security-auditor for the same files
-2. **MCP learning loop must fire** — after every lint fix session, go-guardian:linter MUST call `learn_from_lint`; after every renovate suggestion accept/reject, go-guardian:advisor MUST call `learn_renovate_preference`; never skip
+1. **No duplicate checks** — if go-guardian:security has already consumed the current `.go-guardian/owasp-findings.md` report, don't re-run the OWASP scan in security-auditor for the same files
+2. **Inbox learning loop must fire** — after every lint fix session, go-guardian:linter MUST write a `.go-guardian/inbox/lint-*.md` entry so the Stop-hook can ingest it; after every renovate suggestion accept/reject, go-guardian:advisor MUST write a `.go-guardian/inbox/renovate-*.md` entry; never skip
 3. **security-auditor is escalation, not replacement** — go-guardian:security owns code-level OWASP/CVE; security-auditor owns architecture-level concerns
 4. **team-reviewer extends, not replaces, go-guardian:reviewer** — team-reviewer handles performance/architecture dims in parallel; go-guardian:reviewer retains Go patterns and MCP calls
 5. **beastmode for all feature work on this codebase** — when developing go-guardian itself, use /plan before implementing anything non-trivial. If implementation goes sideways, STOP and re-plan via `/plan` — don't keep pushing

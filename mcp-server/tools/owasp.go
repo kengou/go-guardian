@@ -2,7 +2,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,75 +12,61 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/kengou/go-guardian/mcp-server/owasp"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// RegisterCheckOWASP registers the check_owasp MCP tool.
-// projectRoot is the absolute path to the project being guarded;
-// scan paths are validated to be within this root (fixes FINDING-07).
-func RegisterCheckOWASP(s ToolRegistrar, store *db.Store, projectRoot string) {
-	tool := mcp.NewTool(
-		"check_owasp",
-		mcp.WithDescription("Scan Go source files for OWASP Top 10 security issues (A02, A03, A05, A09, A10)."),
-		mcp.WithString(
-			"path",
-			mcp.Required(),
-			mcp.Description("File path or directory to scan for OWASP issues."),
-		),
-	)
+// RunCheckOWASP scans scanPath for OWASP findings and returns a formatted
+// report. It performs the same store inserts (OWASP findings, scan history,
+// scan snapshot) as the prior MCP handler, so callers get identical
+// side-effects. scanPath is validated to be within projectRoot — paths
+// outside it return an error without any store mutations.
+//
+// This function is the CLI-callable surface for OWASP scanning and is
+// invoked by the go-guardian scan subcommand.
+func RunCheckOWASP(store *db.Store, projectRoot, scanPath string) (string, error) {
+	scanPath = strings.TrimSpace(scanPath)
+	if scanPath == "" {
+		return "", fmt.Errorf("'path' parameter is required")
+	}
 
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		rawPath := req.GetString("path", "")
-		if strings.TrimSpace(rawPath) == "" {
-			return mcp.NewToolResultText("error: 'path' parameter is required"), nil
+	if err := validateScanPath(scanPath, projectRoot); err != nil {
+		return "", err
+	}
+
+	rules := owasp.DefaultRules()
+
+	info, err := os.Stat(scanPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot stat %q: %w", scanPath, err)
+	}
+
+	var findings []owasp.Finding
+	if info.IsDir() {
+		findings, err = owasp.ScanDirectory(scanPath, rules)
+	} else {
+		findings, err = owasp.ScanFile(scanPath, rules)
+	}
+	if err != nil {
+		return "", fmt.Errorf("scanning %q: %w", scanPath, err)
+	}
+
+	// Persist findings to the database in a single batch.
+	items := make([]db.OWASPFindingItem, len(findings))
+	for i, f := range findings {
+		items[i] = db.OWASPFindingItem{
+			Category:    f.Category,
+			FilePattern: filepath.Base(f.File),
+			Finding:     f.Message,
+			FixPattern:  "",
 		}
-		scanPath := strings.TrimSpace(rawPath)
+	}
+	if err := store.InsertOWASPFindingsBatch(items); err != nil {
+		log.Printf("owasp: batch insert failed: %v", err)
+	}
 
-		// SECURITY: reject paths outside project root (fixes FINDING-07).
-		if err := validateScanPath(scanPath, projectRoot); err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("error: %v", err)), nil
-		}
+	_ = store.UpdateScanHistory("owasp", scanPath, len(findings))
+	_ = store.InsertScanSnapshot("owasp", scanPath, len(findings), buildOWASPSnapshotDetail(findings))
 
-		rules := owasp.DefaultRules()
-
-		// Determine whether we are scanning a file or directory.
-		info, err := os.Stat(scanPath)
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("error: cannot stat %q: %v", scanPath, err)), nil
-		}
-
-		var findings []owasp.Finding
-		if info.IsDir() {
-			findings, err = owasp.ScanDirectory(scanPath, rules)
-		} else {
-			findings, err = owasp.ScanFile(scanPath, rules)
-		}
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("error scanning %q: %v", scanPath, err)), nil
-		}
-
-		// Persist findings to the database in a single batch.
-		items := make([]db.OWASPFindingItem, len(findings))
-		for i, f := range findings {
-			items[i] = db.OWASPFindingItem{
-				Category:    f.Category,
-				FilePattern: filepath.Base(f.File),
-				Finding:     f.Message,
-				FixPattern:  "",
-			}
-		}
-		if err := store.InsertOWASPFindingsBatch(items); err != nil {
-			log.Printf("owasp: batch insert failed: %v", err)
-		}
-
-		// Update scan history and append trend snapshot.
-		_ = store.UpdateScanHistory("owasp", scanPath, len(findings))
-		_ = store.InsertScanSnapshot("owasp", scanPath, len(findings), buildOWASPSnapshotDetail(findings))
-
-		// Format output.
-		text := formatFindings(scanPath, findings)
-		return mcp.NewToolResultText(text), nil
-	})
+	return formatFindings(scanPath, findings), nil
 }
 
 // buildOWASPSnapshotDetail creates a JSON detail blob from OWASP findings,

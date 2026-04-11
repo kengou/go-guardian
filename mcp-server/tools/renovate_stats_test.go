@@ -1,13 +1,11 @@
 package tools
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // newRenovateTestStore creates a Store backed by a temporary SQLite database.
@@ -22,39 +20,19 @@ func newRenovateTestStore(t *testing.T) *db.Store {
 	return store
 }
 
-// callRenovateStats invokes the stats handler with optional arguments.
-func callRenovateStats(t *testing.T, store *db.Store, args map[string]any) *mcp.CallToolResult {
+// callRenovateStats invokes RunGetRenovateStats directly and returns the text.
+func callRenovateStats(t *testing.T, store *db.Store, configPath string) string {
 	t.Helper()
-	handler := handleGetRenovateStats(store)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = args
-	result, err := handler(context.Background(), req)
+	text, err := RunGetRenovateStats(store, configPath)
 	if err != nil {
-		t.Fatalf("handler returned unexpected error: %v", err)
+		t.Fatalf("RunGetRenovateStats returned unexpected error: %v", err)
 	}
-	return result
-}
-
-func renovateStatsText(t *testing.T, result *mcp.CallToolResult) string {
-	t.Helper()
-	if len(result.Content) == 0 {
-		t.Fatal("result has no content")
-	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
-	return tc.Text
+	return text
 }
 
 func TestGetRenovateStats_FreshDatabase(t *testing.T) {
 	store := newRenovateTestStore(t)
-	result := callRenovateStats(t, store, nil)
-	text := renovateStatsText(t, result)
-
-	if result.IsError {
-		t.Fatalf("unexpected error result:\n%s", text)
-	}
+	text := callRenovateStats(t, store, "")
 
 	// Should contain header.
 	if !strings.Contains(text, "Renovate Guardian Dashboard") {
@@ -94,8 +72,7 @@ func TestGetRenovateStats_ScoreTrendImproving(t *testing.T) {
 		t.Fatalf("InsertConfigScore: %v", err)
 	}
 
-	result := callRenovateStats(t, store, map[string]any{"config_path": "renovate.json"})
-	text := renovateStatsText(t, result)
+	text := callRenovateStats(t, store, "renovate.json")
 
 	if !strings.Contains(text, "improving") {
 		t.Errorf("expected 'improving' trend.\nOutput:\n%s", text)
@@ -115,8 +92,7 @@ func TestGetRenovateStats_ScoreTrendDegrading(t *testing.T) {
 		t.Fatalf("InsertConfigScore: %v", err)
 	}
 
-	result := callRenovateStats(t, store, map[string]any{"config_path": "renovate.json"})
-	text := renovateStatsText(t, result)
+	text := callRenovateStats(t, store, "renovate.json")
 
 	if !strings.Contains(text, "degrading") {
 		t.Errorf("expected 'degrading' trend.\nOutput:\n%s", text)
@@ -133,8 +109,7 @@ func TestGetRenovateStats_ScoreTrendStable(t *testing.T) {
 		t.Fatalf("InsertConfigScore: %v", err)
 	}
 
-	result := callRenovateStats(t, store, map[string]any{"config_path": "renovate.json"})
-	text := renovateStatsText(t, result)
+	text := callRenovateStats(t, store, "renovate.json")
 
 	if !strings.Contains(text, "stable") {
 		t.Errorf("expected 'stable' trend.\nOutput:\n%s", text)
@@ -148,8 +123,7 @@ func TestGetRenovateStats_ScoreTrendSingleEntry(t *testing.T) {
 		t.Fatalf("InsertConfigScore: %v", err)
 	}
 
-	result := callRenovateStats(t, store, map[string]any{"config_path": "renovate.json"})
-	text := renovateStatsText(t, result)
+	text := callRenovateStats(t, store, "renovate.json")
 
 	// Single score should report stable.
 	if !strings.Contains(text, "stable") {
@@ -171,8 +145,7 @@ func TestGetRenovateStats_WithPreferences(t *testing.T) {
 		t.Fatalf("InsertRenovatePreference: %v", err)
 	}
 
-	result := callRenovateStats(t, store, nil)
-	text := renovateStatsText(t, result)
+	text := callRenovateStats(t, store, "")
 
 	if !strings.Contains(text, "2 total") {
 		t.Errorf("expected '2 total' preferences.\nOutput:\n%s", text)
@@ -197,8 +170,7 @@ func TestGetRenovateStats_RecentScoresWithoutConfigPath(t *testing.T) {
 	}
 
 	// Without config_path, should show recent scores across all paths.
-	result := callRenovateStats(t, store, nil)
-	text := renovateStatsText(t, result)
+	text := callRenovateStats(t, store, "")
 
 	if strings.Contains(text, "No score history available") {
 		t.Errorf("should show score history when scores exist.\nOutput:\n%s", text)

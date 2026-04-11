@@ -1,33 +1,22 @@
 package tools
 
 import (
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestLearnRenovatePreferenceInsert(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleLearnRenovatePreference(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"category":    "automerge",
-		"description": "Always use PR automerge type for visibility",
-		"dont_config": `{"automergeType": "branch"}`,
-		"do_config":   `{"automergeType": "pr"}`,
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunLearnRenovatePreference(
+		store,
+		"automerge",
+		"Always use PR automerge type for visibility",
+		`{"automergeType": "branch"}`,
+		`{"automergeType": "pr"}`,
+	)
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	text := resultText(t, result)
-	if result.IsError {
-		t.Fatalf("unexpected error result: %s", text)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if !strings.Contains(text, "Preference learned") {
@@ -65,24 +54,11 @@ func TestLearnRenovatePreferenceInsert(t *testing.T) {
 
 func TestLearnRenovatePreferenceDedup(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleLearnRenovatePreference(store)
-
-	args := map[string]interface{}{
-		"category":    "scheduling",
-		"description": "Limit PRs to 5 per day",
-	}
 
 	// Insert twice.
 	for i := 0; i < 2; i++ {
-		req := mcp.CallToolRequest{}
-		req.Params.Arguments = args
-		result, err := handler(context.Background(), req)
-		if err != nil {
-			t.Fatalf("handler error on iteration %d: %v", i, err)
-		}
-		if result.IsError {
-			text := resultText(t, result)
-			t.Fatalf("unexpected error result on iteration %d: %s", i, text)
+		if _, err := RunLearnRenovatePreference(store, "scheduling", "Limit PRs to 5 per day", "", ""); err != nil {
+			t.Fatalf("unexpected error on iteration %d: %v", i, err)
 		}
 	}
 
@@ -108,71 +84,47 @@ func TestLearnRenovatePreferenceDedup(t *testing.T) {
 
 func TestLearnRenovatePreferenceInvalidCategory(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleLearnRenovatePreference(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"category":    "nonexistent",
-		"description": "Some preference",
+	_, err := RunLearnRenovatePreference(store, "nonexistent", "Some preference", "", "")
+	if err == nil {
+		t.Fatal("expected error for invalid category, got nil")
 	}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	if !result.IsError {
-		t.Error("expected error result for invalid category")
-	}
-
-	text := resultText(t, result)
-	if !strings.Contains(text, "invalid category") {
-		t.Errorf("expected 'invalid category' in error: %s", text)
+	if !strings.Contains(err.Error(), "invalid category") {
+		t.Errorf("expected 'invalid category' in error: %v", err)
 	}
 }
 
 func TestLearnRenovatePreferenceEmptyFields(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleLearnRenovatePreference(store)
 
 	tests := []struct {
-		name string
-		args map[string]interface{}
-		want string
+		name        string
+		category    string
+		description string
+		want        string
 	}{
 		{
-			name: "empty category",
-			args: map[string]interface{}{
-				"category":    "",
-				"description": "Some preference",
-			},
-			want: "category is required",
+			name:        "empty category",
+			category:    "",
+			description: "Some preference",
+			want:        "category is required",
 		},
 		{
-			name: "empty description",
-			args: map[string]interface{}{
-				"category":    "automerge",
-				"description": "",
-			},
-			want: "description is required",
+			name:        "empty description",
+			category:    "automerge",
+			description: "",
+			want:        "description is required",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := mcp.CallToolRequest{}
-			req.Params.Arguments = tt.args
-
-			result, err := handler(context.Background(), req)
-			if err != nil {
-				t.Fatalf("handler error: %v", err)
+			_, err := RunLearnRenovatePreference(store, tt.category, tt.description, "", "")
+			if err == nil {
+				t.Fatal("expected error, got nil")
 			}
-			if !result.IsError {
-				t.Error("expected error result")
-			}
-			text := resultText(t, result)
-			if !strings.Contains(text, tt.want) {
-				t.Errorf("expected %q in error: %s", tt.want, text)
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected %q in error: %v", tt.want, err)
 			}
 		})
 	}
@@ -180,22 +132,10 @@ func TestLearnRenovatePreferenceEmptyFields(t *testing.T) {
 
 func TestLearnRenovatePreferenceOptionalConfigs(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleLearnRenovatePreference(store)
 
 	// Insert without dont_config and do_config.
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"category":    "security",
-		"description": "Always enable vulnerability alerts",
-	}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	if result.IsError {
-		text := resultText(t, result)
-		t.Fatalf("unexpected error: %s", text)
+	if _, err := RunLearnRenovatePreference(store, "security", "Always enable vulnerability alerts", "", ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Verify it was stored.

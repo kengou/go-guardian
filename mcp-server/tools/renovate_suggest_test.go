@@ -1,11 +1,8 @@
 package tools
 
 import (
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // --- renovateCategoryFromProblem tests ---
@@ -46,20 +43,12 @@ func TestRenovateCategoryFromProblem(t *testing.T) {
 
 func TestSuggestReturnsRelevantRules(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleSuggestRenovateRule(store)
 
 	// The store is seeded with scheduling rules including SCH-1 (prConcurrentLimit).
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"problem": "too many PRs",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunSuggestRenovateRule(store, "too many PRs", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunSuggestRenovateRule: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	// Should contain scheduling-related rules.
 	if !strings.Contains(text, "SCH-") {
@@ -75,19 +64,11 @@ func TestSuggestReturnsRelevantRules(t *testing.T) {
 
 func TestSuggestAutomergeCategory(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleSuggestRenovateRule(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"problem": "how to automerge patches",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunSuggestRenovateRule(store, "how to automerge patches", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunSuggestRenovateRule: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "AM-") {
 		t.Errorf("expected automerge rules (AM-*) in output:\n%s", text)
@@ -99,38 +80,21 @@ func TestSuggestAutomergeCategory(t *testing.T) {
 
 func TestSuggestEmptyProblem(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleSuggestRenovateRule(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"problem": "",
-	}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	if !result.IsError {
-		t.Error("expected error result for empty problem")
+	_, err := RunSuggestRenovateRule(store, "", "")
+	if err == nil {
+		t.Error("expected error for empty problem, got nil")
 	}
 }
 
 func TestSuggestNoMatches(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleSuggestRenovateRule(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"problem": "xyzzy_nonexistent_keyword_12345",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunSuggestRenovateRule(store, "xyzzy_nonexistent_keyword_12345", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunSuggestRenovateRule: %v", err)
 	}
 
-	text := resultText(t, result)
 	if !strings.Contains(text, "No matching rules found") {
 		t.Errorf("expected 'No matching rules found' in output:\n%s", text)
 	}
@@ -144,19 +108,10 @@ func TestSuggestIncludesPreferences(t *testing.T) {
 		t.Fatalf("InsertRenovatePreference: %v", err)
 	}
 
-	handler := handleSuggestRenovateRule(store)
-
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"problem": "too many PRs flooding CI",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunSuggestRenovateRule(store, "too many PRs flooding CI", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunSuggestRenovateRule: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "from learned preferences") {
 		t.Errorf("expected learned preferences count in output:\n%s", text)
@@ -165,20 +120,12 @@ func TestSuggestIncludesPreferences(t *testing.T) {
 
 func TestSuggestLimitsToThree(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleSuggestRenovateRule(store)
 
 	// Query for scheduling which has 6 seeded rules — should only show 3.
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"problem": "too many PRs flooding",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunSuggestRenovateRule(store, "too many PRs flooding", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunSuggestRenovateRule: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	// Count numbered entries (lines starting with "1.", "2.", "3.").
 	count := 0

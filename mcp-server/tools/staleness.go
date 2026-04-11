@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // staleThresholds maps scan type to the duration after which the scan is
@@ -44,31 +42,16 @@ func ProjectID(path string) string {
 	return parent + "/" + base
 }
 
-// RegisterCheckStaleness registers the check_staleness MCP tool with s.
-// The tool accepts a project_path parameter and returns a human-readable
-// staleness report for the project's scan history.
-func RegisterCheckStaleness(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("check_staleness",
-		mcp.WithDescription("Check whether security/lint scans for a project are up to date."),
-		mcp.WithString("project_path",
-			mcp.Required(),
-			mcp.Description("Filesystem path to the project root"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		rawPath := req.GetString("project_path", "")
-		rawPath = strings.TrimSpace(rawPath)
-		if rawPath == "" {
-			return mcp.NewToolResultError("project_path is required"), nil
-		}
-
-		report, err := checkStaleness(store, rawPath)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to read scan history: %v", err)), nil
-		}
-		return mcp.NewToolResultText(report), nil
-	})
+// RunCheckStaleness returns a human-readable staleness report for the project
+// rooted at projectPath. It is a thin exported wrapper around the existing
+// checkStaleness helper so that CLI callers (go-guardian scan) and MCP
+// callers share the same implementation.
+func RunCheckStaleness(store *db.Store, projectPath string) (string, error) {
+	projectPath = strings.TrimSpace(projectPath)
+	if projectPath == "" {
+		return "", fmt.Errorf("project_path is required")
+	}
+	return checkStaleness(store, projectPath)
 }
 
 // checkStaleness contains the core staleness-check logic, separated for

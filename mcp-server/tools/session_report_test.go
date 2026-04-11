@@ -3,24 +3,14 @@ package tools
 import (
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestReportFindingHappyPath(t *testing.T) {
 	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"agent":        "reviewer",
-		"finding_type": "race-condition",
-		"file_path":    "service.go",
-		"description":  "Unsynchronised map access in handler",
-		"severity":     "HIGH",
-	}
 
-	text, err := handleReportFinding(store, "sess-001", req)
+	text, err := RunReportFinding(store, "sess-001", "reviewer", "race-condition", "service.go", "Unsynchronised map access in handler", "HIGH")
 	if err != nil {
-		t.Fatalf("handleReportFinding: %v", err)
+		t.Fatalf("RunReportFinding: %v", err)
 	}
 	if !strings.Contains(text, "Finding #") {
 		t.Errorf("expected finding ID in output, got: %q", text)
@@ -47,16 +37,10 @@ func TestReportFindingHappyPath(t *testing.T) {
 
 func TestReportFindingDefaultSeverity(t *testing.T) {
 	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"agent":        "linter",
-		"finding_type": "errcheck",
-		"description":  "Unchecked error return",
-	}
 
-	text, err := handleReportFinding(store, "sess-002", req)
+	text, err := RunReportFinding(store, "sess-002", "linter", "errcheck", "", "Unchecked error return", "")
 	if err != nil {
-		t.Fatalf("handleReportFinding: %v", err)
+		t.Fatalf("RunReportFinding: %v", err)
 	}
 	if !strings.Contains(text, "MEDIUM") {
 		t.Errorf("expected default MEDIUM severity, got: %q", text)
@@ -65,17 +49,10 @@ func TestReportFindingDefaultSeverity(t *testing.T) {
 
 func TestReportFindingInvalidSeverity(t *testing.T) {
 	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"agent":        "security",
-		"finding_type": "sqli",
-		"description":  "SQL injection risk",
-		"severity":     "BOGUS",
-	}
 
-	text, err := handleReportFinding(store, "sess-003", req)
+	text, err := RunReportFinding(store, "sess-003", "security", "sqli", "", "SQL injection risk", "BOGUS")
 	if err != nil {
-		t.Fatalf("handleReportFinding: %v", err)
+		t.Fatalf("RunReportFinding: %v", err)
 	}
 	// Invalid severity falls back to MEDIUM.
 	if !strings.Contains(text, "MEDIUM") {
@@ -86,19 +63,19 @@ func TestReportFindingInvalidSeverity(t *testing.T) {
 func TestReportFindingMissingParams(t *testing.T) {
 	store := newTestStore(t)
 	cases := []struct {
-		name string
-		args map[string]interface{}
+		name        string
+		agent       string
+		findingType string
+		description string
 	}{
-		{"missing agent", map[string]interface{}{"finding_type": "x", "description": "y"}},
-		{"missing finding_type", map[string]interface{}{"agent": "a", "description": "y"}},
-		{"missing description", map[string]interface{}{"agent": "a", "finding_type": "x"}},
+		{"missing agent", "", "x", "y"},
+		{"missing finding_type", "a", "", "y"},
+		{"missing description", "a", "x", ""},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := mcp.CallToolRequest{}
-			req.Params.Arguments = tc.args
-			_, err := handleReportFinding(store, "sess-004", req)
+			_, err := RunReportFinding(store, "sess-004", tc.agent, tc.findingType, "", tc.description, "")
 			if err == nil {
 				t.Error("expected error for missing params")
 			}
@@ -108,14 +85,8 @@ func TestReportFindingMissingParams(t *testing.T) {
 
 func TestReportFindingNoSession(t *testing.T) {
 	store := newTestStore(t)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"agent":        "reviewer",
-		"finding_type": "bug",
-		"description":  "something",
-	}
 
-	_, err := handleReportFinding(store, "", req)
+	_, err := RunReportFinding(store, "", "reviewer", "bug", "", "something", "")
 	if err == nil {
 		t.Error("expected error for empty session ID")
 	}

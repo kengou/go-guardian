@@ -1,47 +1,19 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// RegisterGetHealthTrends registers the get_health_trends MCP tool.
-func RegisterGetHealthTrends(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool(
-		"get_health_trends",
-		mcp.WithDescription(
-			"Show whether the codebase is improving or degrading over time. "+
-				"Compares scan snapshots to determine direction, highlights "+
-				"recurring issues, and reports new vs resolved findings.",
-		),
-		mcp.WithString("project",
-			mcp.Description("Project identifier (optional)"),
-		),
-		mcp.WithString("scan_type",
-			mcp.Description("Filter to a specific scan type: owasp, vuln, lint, full (optional)"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		project := req.GetString("project", "")
-		scanType := req.GetString("scan_type", "")
-
-		text, err := handleGetHealthTrends(store, project, scanType)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("health trends: %v", err)), nil
-		}
-		return mcp.NewToolResultText(text), nil
-	})
-}
-
-// handleGetHealthTrends is the core logic, separated for testability.
-func handleGetHealthTrends(store *db.Store, project, scanType string) (string, error) {
+// RunGetHealthTrends returns a formatted health-trends report for the given
+// project (or all projects if empty). scanType optionally filters to a single
+// scan type (owasp, vuln, lint, full). This is the CLI-callable surface for
+// get_health_trends and is invoked by the go-guardian scan subcommand.
+func RunGetHealthTrends(store *db.Store, project, scanType string) (string, error) {
 	var snapshots []db.ScanSnapshot
 	var err error
 

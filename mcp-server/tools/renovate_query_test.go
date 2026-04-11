@@ -1,28 +1,17 @@
 package tools
 
 import (
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestRenovateQueryByCategory(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleRenovateQueryKnowledge(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"category": "automerge",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "automerge", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "=== Renovate Knowledge: automerge ===") {
 		t.Errorf("expected header with category name:\n%s", text)
@@ -40,19 +29,11 @@ func TestRenovateQueryByCategory(t *testing.T) {
 
 func TestRenovateQueryByKeyword(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleRenovateQueryKnowledge(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"query": "automerge",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "", "automerge")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	// Should find rules that mention automerge in title or description.
 	if !strings.Contains(text, "Rules (") {
@@ -65,19 +46,11 @@ func TestRenovateQueryByKeyword(t *testing.T) {
 
 func TestRenovateQueryEmptyResults(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleRenovateQueryKnowledge(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"query": "xyzzy_nonexistent_keyword_99999",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "", "xyzzy_nonexistent_keyword_99999")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "No results found") {
 		t.Errorf("expected 'No results found' for nonsense query:\n%s", text)
@@ -92,19 +65,10 @@ func TestRenovateQueryCategoryWithPreferences(t *testing.T) {
 		t.Fatalf("InsertRenovatePreference: %v", err)
 	}
 
-	handler := handleRenovateQueryKnowledge(store)
-
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"category": "scheduling",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "scheduling", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "Rules (") {
 		t.Errorf("expected Rules section:\n%s", text)
@@ -119,18 +83,12 @@ func TestRenovateQueryCategoryWithPreferences(t *testing.T) {
 
 func TestRenovateQueryAllNoCriteria(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleRenovateQueryKnowledge(store)
 
 	// No category and no query returns everything (capped to 10).
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "=== Renovate Knowledge: all ===") {
 		t.Errorf("expected 'all' label:\n%s", text)
@@ -142,18 +100,12 @@ func TestRenovateQueryAllNoCriteria(t *testing.T) {
 
 func TestRenovateQueryResultsCappedAtTen(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleRenovateQueryKnowledge(store)
 
 	// Query all rules — the seed data has more than 10 total.
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	// Count rule entries (lines matching "  [XXX-N] SEVERITY:").
 	ruleCount := 0
@@ -184,19 +136,10 @@ func TestRenovateQueryKeywordWithPreferences(t *testing.T) {
 		t.Fatalf("InsertRenovatePreference: %v", err)
 	}
 
-	handler := handleRenovateQueryKnowledge(store)
-
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"query": "automerge",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "", "automerge")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "Learned Preferences (") {
 		t.Errorf("expected Learned Preferences section for keyword search:\n%s", text)
@@ -208,19 +151,11 @@ func TestRenovateQueryKeywordWithPreferences(t *testing.T) {
 
 func TestRenovateQueryInvalidCategoryReturnsEmpty(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleRenovateQueryKnowledge(store)
 
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"category": "nonexistent_category_xyz",
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunQueryRenovateKnowledge(store, "nonexistent_category_xyz", "")
 	if err != nil {
-		t.Fatalf("handler error: %v", err)
+		t.Fatalf("RunQueryRenovateKnowledge: %v", err)
 	}
-
-	text := resultText(t, result)
 
 	if !strings.Contains(text, "No results found") {
 		t.Errorf("expected 'No results found' for invalid category:\n%s", text)
