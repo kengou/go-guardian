@@ -26,7 +26,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const version = "0.3.1"
+const version = "0.4.0"
 
 func main() {
 	// ── Subcommand dispatch (new CLI mode) ────────────────────────────────
