@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,7 +30,7 @@ type ingestOptions struct {
 //	--db          path to the SQLite learning database
 //	--inbox-dir   inbox directory (defaults to <db-dir>/inbox)
 //	--session-id  override session ID (defaults to env var or session-id file)
-func parseIngestArgs(args []string, stderr io.Writer) (ingestOptions, int) {
+func parseIngestArgs(args []string, stderr io.Writer) (opts ingestOptions, exitCode int) {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -41,7 +42,7 @@ func parseIngestArgs(args []string, stderr io.Writer) (ingestOptions, int) {
 		return ingestOptions{}, 2
 	}
 
-	opts := ingestOptions{
+	opts = ingestOptions{
 		dbPath:    *dbPath,
 		inboxDir:  *inboxDir,
 		sessionID: *sessionID,
@@ -205,8 +206,8 @@ type inboxDoc struct {
 //
 //   - plain scalar:      key: value
 //   - block scalar:      key: |
-//                          multi
-//                          line
+//     multi
+//     line
 //   - quoted scalar:     key: "value with : colon"
 //
 // It is intentionally not a general YAML parser — inbox docs are written
@@ -224,7 +225,7 @@ func parseInboxDoc(path string) (*inboxDoc, error) {
 	text = strings.TrimPrefix(text, "\ufeff")
 
 	if !strings.HasPrefix(text, "---\n") && !strings.HasPrefix(text, "---\r\n") {
-		return nil, fmt.Errorf("missing opening --- delimiter")
+		return nil, errors.New("missing opening --- delimiter")
 	}
 	text = strings.TrimPrefix(text, "---\n")
 	text = strings.TrimPrefix(text, "---\r\n")
@@ -245,7 +246,7 @@ func parseInboxDoc(path string) (*inboxDoc, error) {
 		}
 	}
 	if closeIdx < 0 {
-		return nil, fmt.Errorf("missing closing --- delimiter")
+		return nil, errors.New("missing closing --- delimiter")
 	}
 	frontmatter := text[:closeIdx+1] // include the trailing newline of the last key
 	body := ""
@@ -266,7 +267,7 @@ func parseInboxDoc(path string) (*inboxDoc, error) {
 		body:       body,
 	}
 	if doc.kind == "" {
-		return nil, fmt.Errorf("missing 'kind' field")
+		return nil, errors.New("missing 'kind' field")
 	}
 	return doc, nil
 }
@@ -291,15 +292,15 @@ func parseInboxFrontmatter(text string) (map[string]string, error) {
 		if line[0] == ' ' || line[0] == '\t' {
 			return nil, fmt.Errorf("unexpected indentation on line %d: %q", i+1, line)
 		}
-		colon := strings.Index(line, ":")
-		if colon < 0 {
+		before, after, ok := strings.Cut(line, ":")
+		if !ok {
 			return nil, fmt.Errorf("missing ':' on line %d: %q", i+1, line)
 		}
-		key := strings.TrimSpace(line[:colon])
+		key := strings.TrimSpace(before)
 		if key == "" {
 			return nil, fmt.Errorf("empty key on line %d: %q", i+1, line)
 		}
-		rest := strings.TrimSpace(line[colon+1:])
+		rest := strings.TrimSpace(after)
 
 		if rest == "|" || rest == "|-" {
 			// Block scalar: consume indented lines until dedent or EOF.
@@ -413,7 +414,7 @@ func routeLintDoc(store *db.Store, doc *inboxDoc) error {
 	dontCode := doc.fields["dont_code"]
 	doCode := doc.fields["do_code"]
 	if rule == "" || fileGlob == "" || dontCode == "" || doCode == "" {
-		return fmt.Errorf("lint doc missing required fields (rule, file_glob, dont_code, do_code)")
+		return errors.New("lint doc missing required fields (rule, file_glob, dont_code, do_code)")
 	}
 	if err := store.InsertLintPattern(rule, fileGlob, dontCode, doCode, "inbox-lint"); err != nil {
 		return fmt.Errorf("insert lint pattern: %w", err)
@@ -432,7 +433,7 @@ func routeReviewDoc(store *db.Store, doc *inboxDoc) error {
 	doCode := doc.fields["do_code"]
 	filePath := strings.TrimSpace(doc.fields["file_path"])
 	if description == "" || severity == "" || category == "" || dontCode == "" || doCode == "" {
-		return fmt.Errorf("review doc missing required fields (description, severity, category, dont_code, do_code)")
+		return errors.New("review doc missing required fields (description, severity, category, dont_code, do_code)")
 	}
 	if _, err := tools.RunLearnFromReview(store, description, severity, category, dontCode, doCode, filePath); err != nil {
 		return fmt.Errorf("learn from review: %w", err)
@@ -450,7 +451,7 @@ func routeFindingDoc(store *db.Store, sessionID string, doc *inboxDoc) error {
 	filePath := strings.TrimSpace(doc.fields["file_path"])
 	severity := strings.TrimSpace(doc.fields["severity"])
 	if agent == "" || findingType == "" || description == "" {
-		return fmt.Errorf("finding doc missing required fields (agent, finding_type, description)")
+		return errors.New("finding doc missing required fields (agent, finding_type, description)")
 	}
 	if _, err := tools.RunReportFinding(store, sessionID, agent, findingType, filePath, description, severity); err != nil {
 		return fmt.Errorf("report finding: %w", err)
@@ -466,7 +467,7 @@ func routeRenovatePrefDoc(store *db.Store, doc *inboxDoc) error {
 	dontConfig := doc.fields["dont_config"]
 	doConfig := doc.fields["do_config"]
 	if category == "" || description == "" {
-		return fmt.Errorf("renovate-pref doc missing required fields (category, description)")
+		return errors.New("renovate-pref doc missing required fields (category, description)")
 	}
 	if _, err := tools.RunLearnRenovatePreference(store, category, description, dontConfig, doConfig); err != nil {
 		return fmt.Errorf("learn renovate preference: %w", err)

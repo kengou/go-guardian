@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/go-guardian/mcp-server/db"
 	_ "modernc.org/sqlite"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // TestCLIFoundation_IntegrationScenarios exercises the 7 Gherkin scenarios

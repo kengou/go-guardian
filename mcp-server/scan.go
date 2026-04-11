@@ -55,7 +55,7 @@ type scanOptions struct {
 // parseScanArgs parses scan-subcommand flags into scanOptions. It mirrors
 // the dispatchHealthcheck convention: use a ContinueOnError flag.FlagSet
 // so a parse failure returns exit code 2 without panicking.
-func parseScanArgs(args []string, stderr io.Writer) (scanOptions, int) {
+func parseScanArgs(args []string, stderr io.Writer) (opts scanOptions, exitCode int) {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -72,7 +72,7 @@ func parseScanArgs(args []string, stderr io.Writer) (scanOptions, int) {
 		return scanOptions{}, 2
 	}
 
-	opts := scanOptions{
+	opts = scanOptions{
 		dbPath:    *dbPath,
 		sourceDir: *sourceDir,
 	}
@@ -381,7 +381,7 @@ func runPatternsDimension(store *db.Store, guardianDir, checksum string, now tim
 // finding total.
 func countLines(s string) int {
 	n := 0
-	for _, ln := range strings.Split(s, "\n") {
+	for ln := range strings.SplitSeq(s, "\n") {
 		if strings.TrimSpace(ln) != "" {
 			n++
 		}

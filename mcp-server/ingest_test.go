@@ -153,7 +153,9 @@ func TestEnsureInboxDirs(t *testing.T) {
 func TestMoveToProcessed(t *testing.T) {
 	root := t.TempDir()
 	inbox := filepath.Join(root, "inbox")
-	_ = ensureInboxDirs(inbox)
+	if err := ensureInboxDirs(inbox); err != nil {
+		t.Fatalf("ensureInboxDirs: %v", err)
+	}
 	src := filepath.Join(inbox, "lint-move.md")
 	if err := os.WriteFile(src, []byte("body"), 0o600); err != nil {
 		t.Fatalf("write src: %v", err)
@@ -172,7 +174,9 @@ func TestMoveToProcessed(t *testing.T) {
 func TestMoveToFailed_PrependsHeader(t *testing.T) {
 	root := t.TempDir()
 	inbox := filepath.Join(root, "inbox")
-	_ = ensureInboxDirs(inbox)
+	if err := ensureInboxDirs(inbox); err != nil {
+		t.Fatalf("ensureInboxDirs: %v", err)
+	}
 	src := filepath.Join(inbox, "lint-bad.md")
 	if err := os.WriteFile(src, []byte("original content\n"), 0o600); err != nil {
 		t.Fatalf("write src: %v", err)
@@ -198,7 +202,9 @@ func TestMoveToFailed_PrependsHeader(t *testing.T) {
 func TestProcessedHasSibling(t *testing.T) {
 	root := t.TempDir()
 	inbox := filepath.Join(root, "inbox")
-	_ = ensureInboxDirs(inbox)
+	if err := ensureInboxDirs(inbox); err != nil {
+		t.Fatalf("ensureInboxDirs: %v", err)
+	}
 	src := filepath.Join(inbox, "lint-sib.md")
 	if processedHasSibling(inbox, src) {
 		t.Errorf("expected no sibling for fresh file")

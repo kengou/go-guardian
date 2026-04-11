@@ -1,36 +1,186 @@
-version: "2"
+# golangci-lint config for go-guardian mcp-server — v2 format
+#
+# Adapted from github.com/kengou/gitlab-tools/.golangci.yml for consistency
+# across kengou Go projects.
 
-# golangci-lint config for go-guardian MCP server.
-#
-# The CI workflow runs staticcheck as a hard gate; this config is the
-# complementary golangci-lint surface (run locally with `golangci-lint run ./...`).
-#
-# Policy:
-#   - errcheck is on, but writes to stdout/stderr and Close() on common cleanup
-#     types are excluded because the error channel is the very thing that
-#     failed — there is no meaningful handling beyond process exit, which is
-#     already happening in the surrounding code.
-#   - ineffassign / staticcheck / govet stay at defaults.
+version: "2"
+run:
+  modules-download-mode: readonly
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/kengou/go-guardian
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - ^bin/
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 
 linters:
+  default: none
+  enable:
+    - bodyclose
+    - containedctx
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errcheck
+    - errname
+    - errorlint
+    - exptostd
+    - forbidigo
+    - gocheckcompilerdirectives
+    - goconst
+    - gocritic
+    - gomoddirectives
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - iotamixing
+    - modernize
+    - nilerr
+    - nolintlint
+    - nosprintfhostport
+    - perfsprint
+    - predeclared
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - whitespace
   settings:
+    dupword:
+      ignore: ["TRUE", "FALSE", "NULL"]
     errcheck:
+      check-type-assertions: false
+      check-blank: true
       exclude-functions:
-        # CLI output — writes to stdout/stderr whose error channel is the
-        # same broken thing we'd report to.
+        - encoding/json.Marshal
+        - (net/http.ResponseWriter).Write
+        - (*github.com/spf13/cobra.Command).Help
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
-        - (*bytes.Buffer).WriteString
-        - (*strings.Builder).WriteString
-        - (*strings.Builder).WriteRune
-        - (*strings.Builder).WriteByte
-        # Cleanup paths — Close() on resources whose lifetime ends with the
-        # surrounding scope. Test files use these exclusively and production
-        # code uses them only on teardown where failure is untestable.
-        - (io.Closer).Close
-        - (*database/sql.DB).Close
-        - (net.Listener).Close
-        # JSON encoding to http.ResponseWriter — error goes to a connection
-        # that is already torn down by the time we could react.
-        - (*encoding/json.Encoder).Encode
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^ioutil\..*$
+        - pkg: ^gopkg\.in/square/go-jose\.v2$
+          msg: gopkg.in/square/go-jose is archived and has CVEs. Replace with gopkg.in/go-jose/go-jose.v2
+        - pkg: ^github\.com/coreos/go-oidc$
+          msg: github.com/coreos/go-oidc depends on the archived gopkg.in/square/go-jose. Use github.com/coreos/go-oidc/v3
+        - pkg: ^github\.com/howeyc/gopass$
+          msg: github.com/howeyc/gopass is archived, use golang.org/x/term instead
+    goconst:
+      min-occurrences: 5
+    gocritic:
+      enabled-checks:
+        - boolExprSimplify
+        - builtinShadow
+        - emptyStringTest
+        - evalOrder
+        - httpNoBody
+        - importShadow
+        - initClause
+        - methodExprCall
+        - paramTypeCombine
+        - preferFilepathJoin
+        - ptrToRefParam
+        - redundantSprint
+        - returnAfterHttpError
+        - stringConcatSimplify
+        - timeExprSimplify
+        - truncateCmp
+        - typeAssertChain
+        - typeUnparen
+        - unnamedResult
+        - unnecessaryBlock
+        - unnecessaryDefer
+        - weakCond
+        - yodaStyleExpr
+    gomoddirectives:
+      toolchain-forbidden: true
+      go-version-pattern: 1\.\d+(\.\d+)?$
+    gosec:
+      excludes:
+        - G112  # ReadHeaderTimeout vs Slowloris — exposes Keep-Alive races
+        - G117  # explicit credential serialisation is intentional when used
+        - G306  # umask handles permissions where applicable
+        - G701
+        - G702
+        - G703
+        - G704
+        - G705
+        - G706
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    nolintlint:
+      require-specific: true
+    perfsprint:
+      concat-loop: false
+    usestdlibvars:
+      http-method: true
+      http-status-code: true
+      time-weekday: true
+      time-month: true
+      time-layout: true
+      crypto-hash: true
+      default-rpc-path: true
+      sql-isolation-level: true
+      tls-signature-scheme: true
+      constant-kind: true
+    usetesting:
+      os-temp-dir: true
+    whitespace:
+      multi-func: true
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Test code is allowed to be lax about error returns from fake-server
+      # JSON encoders, strconv conversions on test data, etc. — these are
+      # operating on synthetic input where a failure indicates a test bug,
+      # not a production concern.
+      - linters:
+          - bodyclose
+          - revive
+        path: _test\.go
+      # It is idiomatic Go to reuse the name 'err' with ':=' for subsequent errors.
+      # Ref: https://go.dev/doc/effective_go#redeclaration
+      - path: (.+)\.go$
+        text: declaration of "err" shadows declaration at
+      - linters:
+          - goconst
+        path: (.+)_test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - ^bin/
+
+output:
+  formats:
+    text:
+      print-issued-lines: false

@@ -146,7 +146,7 @@ func dispatchRenovateAnalyze(args []string, stdout, stderr io.Writer) int {
 	// Extract the Score line for the stdout confirmation. The body format is
 	// "=== Renovate Config Analysis: <path> ===\nScore: N/100\n...".
 	scoreLine := ""
-	for _, ln := range strings.Split(body, "\n") {
+	for ln := range strings.SplitSeq(body, "\n") {
 		if strings.HasPrefix(ln, "Score:") {
 			scoreLine = " (" + strings.TrimSpace(ln) + ")"
 			break
@@ -295,8 +295,9 @@ func renovateOutputDir(dbPath string) string {
 }
 
 // openRenovateStore opens the SQLite store at dbPath with consistent error
-// formatting for the renovate verb family. Caller owns Close().
-func openRenovateStore(dbPath string, stderr io.Writer, verb string) (*db.Store, int) {
+// formatting for the renovate verb family. Caller owns Close(). The second
+// return value is the exit code — 0 on success, non-zero on failure.
+func openRenovateStore(dbPath string, stderr io.Writer, verb string) (store *db.Store, exitCode int) {
 	store, err := db.NewStore(dbPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "go-guardian renovate %s: open db %s: %v\n", verb, dbPath, err)
@@ -308,7 +309,7 @@ func openRenovateStore(dbPath string, stderr io.Writer, verb string) (*db.Store,
 // atomicWriteMarkdown writes body to path atomically (tmp + rename) with 0o600
 // permissions. Used by analyze/suggest to emit artifact files. Parent directory
 // must already exist.
-func atomicWriteMarkdown(path string, body string) error {
+func atomicWriteMarkdown(path, body string) error {
 	if !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
@@ -322,4 +323,3 @@ func atomicWriteMarkdown(path string, body string) error {
 	}
 	return nil
 }
-

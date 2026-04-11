@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/go-guardian/mcp-server/db"
 	_ "modernc.org/sqlite"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // seedInboxProject creates a minimal inbox layout under root and returns
@@ -36,18 +37,18 @@ func seedInboxProject(t *testing.T, root string) (dbPath, inboxDir string) {
 
 // runIngest is a thin wrapper that calls Dispatch with an ingest arg list
 // and returns exit code + captured stdout/stderr.
-func runIngest(t *testing.T, args ...string) (int, string, string) {
+func runIngest(t *testing.T, args ...string) (exit int, stdoutStr, stderrStr string) {
 	t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	full := append([]string{"ingest"}, args...)
-	exit := Dispatch(full, stdout, stderr)
+	exit = Dispatch(full, stdout, stderr)
 	return exit, stdout.String(), stderr.String()
 }
 
-// writeInboxDoc writes an inbox document at path with the given frontmatter
-// map and body. Keys are emitted in deterministic order.
-func writeInboxDoc(t *testing.T, path string, frontmatter map[string]string, body string) {
+// writeInboxDoc writes an inbox document at path containing only the given
+// frontmatter (no body). Keys are emitted in deterministic order.
+func writeInboxDoc(t *testing.T, path string, frontmatter map[string]string) {
 	t.Helper()
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -78,7 +79,6 @@ func writeInboxDoc(t *testing.T, path string, frontmatter map[string]string, bod
 		sb.WriteString("\n")
 	}
 	sb.WriteString("---\n\n")
-	sb.WriteString(body)
 	if err := os.WriteFile(path, []byte(sb.String()), 0o600); err != nil {
 		t.Fatalf("write inbox doc %s: %v", path, err)
 	}
@@ -123,7 +123,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 			"file_glob": "*.go",
 			"dont_code": "defer f.Close()",
 			"do_code":   "defer func() { _ = f.Close() }()",
-		}, "")
+		})
 
 		exit, stdout, stderr := runIngest(t, "--db", dbPath, "--inbox-dir", inboxDir)
 		if exit != 0 {
@@ -169,7 +169,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 			"file_path":   "service.go",
 			"dont_code":   "m[key] = val",
 			"do_code":     "mu.Lock(); m[key] = val; mu.Unlock()",
-		}, "")
+		})
 
 		exit, stdout, stderr := runIngest(t, "--db", dbPath, "--inbox-dir", inboxDir)
 		if exit != 0 {
@@ -211,7 +211,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 			"file_path":    "handler.go",
 			"description":  "goroutine leak on panic path",
 			"severity":     "MEDIUM",
-		}, "")
+		})
 
 		exit, stdout, stderr := runIngest(t, "--db", dbPath, "--inbox-dir", inboxDir)
 		if exit != 0 {
@@ -247,19 +247,19 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		writeInboxDoc(t, filepath.Join(inboxDir, "lint-1.md"), map[string]string{
 			"kind": "lint", "rule": "errcheck", "file_glob": "*.go",
 			"dont_code": "a()", "do_code": "_ = a()",
-		}, "")
+		})
 		writeInboxDoc(t, filepath.Join(inboxDir, "review-1.md"), map[string]string{
 			"kind": "review", "description": "X", "severity": "LOW", "category": "design",
 			"dont_code": "x", "do_code": "y",
-		}, "")
+		})
 		writeInboxDoc(t, filepath.Join(inboxDir, "finding-1.md"), map[string]string{
 			"kind": "finding", "agent": "linter", "finding_type": "errcheck",
 			"description": "z",
-		}, "")
+		})
 		writeInboxDoc(t, filepath.Join(inboxDir, "renovate-pref-1.md"), map[string]string{
 			"kind": "renovate-pref", "category": "automerge",
 			"description": "auto-merge patch updates",
-		}, "")
+		})
 
 		exit, stdout, stderr := runIngest(t, "--db", dbPath, "--inbox-dir", inboxDir)
 		if exit != 0 {
@@ -284,7 +284,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		writeInboxDoc(t, filepath.Join(inboxDir, "lint-good.md"), map[string]string{
 			"kind": "lint", "rule": "errcheck", "file_glob": "*.go",
 			"dont_code": "x", "do_code": "y",
-		}, "")
+		})
 		// Malformed: no closing --- delimiter.
 		if err := os.WriteFile(filepath.Join(inboxDir, "lint-bad.md"),
 			[]byte("---\nkind: lint\nrule: errcheck\n"), 0o600); err != nil {
@@ -331,7 +331,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		writeInboxDoc(t, inboxPath, map[string]string{
 			"kind": "lint", "rule": "errcheck", "file_glob": "*.go",
 			"dont_code": "x", "do_code": "y",
-		}, "")
+		})
 
 		exit, stdout, _ := runIngest(t, "--db", dbPath, "--inbox-dir", inboxDir)
 		if exit != 0 {
@@ -373,7 +373,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		writeInboxDoc(t, filepath.Join(inboxDir, "lint-new.md"), map[string]string{
 			"kind": "lint", "rule": "errcheck", "file_glob": "*.go",
 			"dont_code": "new dont", "do_code": "new do",
-		}, "")
+		})
 
 		exit, stdout, _ := runIngest(t, "--db", dbPath, "--inbox-dir", inboxDir)
 		if exit != 0 {

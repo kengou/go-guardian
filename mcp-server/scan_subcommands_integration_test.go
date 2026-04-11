@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kengou/go-guardian/mcp-server/db"
 	_ "modernc.org/sqlite"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // seedProject creates a minimal Go project layout under root and returns
@@ -39,12 +40,12 @@ func seedProject(t *testing.T, root string) string {
 
 // runScan is a thin wrapper that calls Dispatch with a scan arg list and
 // returns exit code + captured stdout/stderr.
-func runScan(t *testing.T, args ...string) (int, string, string) {
+func runScan(t *testing.T, args ...string) (exit int, stdoutStr, stderrStr string) {
 	t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	full := append([]string{"scan"}, args...)
-	exit := Dispatch(full, stdout, stderr)
+	exit = Dispatch(full, stdout, stderr)
 	return exit, stdout.String(), stderr.String()
 }
 
@@ -181,9 +182,9 @@ func TestScanSubcommands_IntegrationScenarios(t *testing.T) {
 		// Each case asserts exit 0 AND that the expected output files are the
 		// *only* files created under .go-guardian/ besides the DB and checksum.
 		cases := []struct {
-			name        string
-			flag        string
-			wantFiles   []string
+			name      string
+			flag      string
+			wantFiles []string
 		}{
 			{"OWASP vulnerabilities", "--owasp", []string{"owasp-findings.md"}},
 			{"dependency CVEs", "--deps", []string{"dep-vulns.md"}},

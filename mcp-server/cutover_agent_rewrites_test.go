@@ -81,7 +81,7 @@ func readCutoverAgent(t *testing.T, name string) string {
 
 // splitFrontmatter returns (frontmatter, body). If the file has no YAML
 // frontmatter the whole content is returned as the body.
-func splitFrontmatter(t *testing.T, content string) (string, string) {
+func splitFrontmatter(t *testing.T, content string) (frontmatter, body string) {
 	t.Helper()
 	if !strings.HasPrefix(content, "---\n") {
 		return "", content

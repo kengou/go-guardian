@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/go-guardian/mcp-server/db"
 	_ "modernc.org/sqlite"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // seedRenovateProject creates a minimal .go-guardian layout under root, opens
@@ -41,12 +42,12 @@ func writeRenovateConfig(t *testing.T, path, body string) {
 
 // runRenovate wraps Dispatch with a renovate arg list and returns exit code
 // plus captured stdout/stderr.
-func runRenovate(t *testing.T, args ...string) (int, string, string) {
+func runRenovate(t *testing.T, args ...string) (exit int, stdoutStr, stderrStr string) {
 	t.Helper()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	full := append([]string{"renovate"}, args...)
-	exit := Dispatch(full, stdout, stderr)
+	exit = Dispatch(full, stdout, stderr)
 	return exit, stdout.String(), stderr.String()
 }
 

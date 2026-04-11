@@ -11,7 +11,10 @@ import (
 func TestWriteScanOutput_FrontmatterAndBody(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
-	ts, _ := time.Parse(time.RFC3339, "2026-04-09T12:34:56Z")
+	ts, err := time.Parse(time.RFC3339, "2026-04-09T12:34:56Z")
+	if err != nil {
+		t.Fatalf("parse ts: %v", err)
+	}
 
 	if err := writeScanOutput(path, "owasp", "deadbeef", ts, 3, "body line 1\nbody line 2"); err != nil {
 		t.Fatalf("writeScanOutput: %v", err)
@@ -48,7 +51,10 @@ func TestWriteScanOutput_ZeroCountValid(t *testing.T) {
 	if err := writeScanOutput(path, "deps", "cafebabe", time.Now(), 0, "no findings"); err != nil {
 		t.Fatalf("writeScanOutput zero: %v", err)
 	}
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
 	if !strings.Contains(string(data), "count: 0") {
 		t.Errorf("zero count not rendered; got:\n%s", data)
 	}
@@ -130,7 +136,9 @@ func TestExpectedOutputFiles_AllDimensions(t *testing.T) {
 
 func TestAllFilesExist(t *testing.T) {
 	dir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(dir, "a.md"), []byte("a"), 0o600)
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("a"), 0o600); err != nil {
+		t.Fatalf("write a.md: %v", err)
+	}
 	if !allFilesExist(dir, []string{"a.md"}) {
 		t.Errorf("expected a.md to exist")
 	}

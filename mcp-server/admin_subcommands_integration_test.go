@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kengou/go-guardian/mcp-server/db"
 	_ "modernc.org/sqlite"
+
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
 // seedAdminProject creates a .go-guardian/ directory under root, opens the
@@ -65,11 +66,11 @@ func freeTCPPort(t *testing.T) int {
 // captured), performs probes, then calls cancel(). The returned WaitExit
 // blocks until the dispatcher returns and yields its exit code plus stderr.
 type adminRun struct {
-	addrCh   chan string
-	exitCh   chan int
-	stderr   *syncBuffer
-	stdout   *syncBuffer
-	cancel   context.CancelFunc
+	addrCh chan string
+	exitCh chan int
+	stderr *syncBuffer
+	stdout *syncBuffer
+	cancel context.CancelFunc
 }
 
 // syncBuffer is a byte buffer with a mutex so concurrent dispatcher writes
@@ -131,16 +132,21 @@ func (r *adminRun) waitForReady(t *testing.T, timeout time.Duration) string {
 	}
 }
 
+// adminExitTimeout is the maximum time the admin dispatcher has to return
+// after cancellation (or after a self-terminating failure like port-bind).
+// A generous 5s covers the shutdown grace period plus serve goroutine drain.
+const adminExitTimeout = 5 * time.Second
+
 // waitForExit blocks until the dispatcher returns. Must be called after
 // cancel() has been invoked (or after a code path that causes the dispatcher
 // to exit on its own, e.g. a port-bind failure).
-func (r *adminRun) waitForExit(t *testing.T, timeout time.Duration) int {
+func (r *adminRun) waitForExit(t *testing.T) int {
 	t.Helper()
 	select {
 	case exit := <-r.exitCh:
 		return exit
-	case <-time.After(timeout):
-		t.Fatalf("admin dispatcher did not exit within %s; stderr=%s", timeout, r.stderr.String())
+	case <-time.After(adminExitTimeout):
+		t.Fatalf("admin dispatcher did not exit within %s; stderr=%s", adminExitTimeout, r.stderr.String())
 		return -1
 	}
 }
@@ -189,14 +195,14 @@ func TestAdminSubcommands_IntegrationScenarios(t *testing.T) {
 			run.cancel()
 			t.Fatalf("dashboard probe failed: %v; stderr=%s", err, run.stderr.String())
 		}
-		if resp.StatusCode != 200 {
+		if resp.StatusCode != http.StatusOK {
 			run.cancel()
 			t.Fatalf("dashboard probe status=%d, want 200", resp.StatusCode)
 		}
 		_ = resp.Body.Close()
 
 		run.cancel()
-		exit := run.waitForExit(t, 5*time.Second)
+		exit := run.waitForExit(t)
 		if exit != 0 {
 			t.Errorf("admin exit=%d after cancel, want 0; stderr=%s", exit, run.stderr.String())
 		}
@@ -238,7 +244,7 @@ func TestAdminSubcommands_IntegrationScenarios(t *testing.T) {
 		}
 
 		run.cancel()
-		if exit := run.waitForExit(t, 5*time.Second); exit != 0 {
+		if exit := run.waitForExit(t); exit != 0 {
 			t.Errorf("admin exit=%d after cancel, want 0", exit)
 		}
 	})
@@ -259,7 +265,7 @@ func TestAdminSubcommands_IntegrationScenarios(t *testing.T) {
 
 		// Stop via context cancel (stand-in for SIGINT).
 		run.cancel()
-		if exit := run.waitForExit(t, 5*time.Second); exit != 0 {
+		if exit := run.waitForExit(t); exit != 0 {
 			t.Errorf("admin exit=%d after cancel, want 0", exit)
 		}
 
@@ -291,7 +297,7 @@ func TestAdminSubcommands_IntegrationScenarios(t *testing.T) {
 		run := runAdminWithContext(t, "--db", dbPath, "--port", itoa(port))
 
 		// The dispatcher must return non-zero before reporting ready.
-		exit := run.waitForExit(t, 5*time.Second)
+		exit := run.waitForExit(t)
 		if exit == 0 {
 			t.Errorf("admin exit=0 on port conflict, want non-zero; stderr=%s", run.stderr.String())
 		}
