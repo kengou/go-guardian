@@ -1,40 +1,47 @@
 ---
 name: go
-description: Central Go development orchestrator. Routes to specialized agents.
+description: Central Go development orchestrator. MoE gating: classifies intent, runs one unified scan, spawns only reviewers with non-empty findings.
 argument-hint: "[scan|review|test|lint|security|deps|design|plan|implement|validate|docs|explain|diagram|adr|api-docs] [path|topic]"
 paths: "*.go,go.mod,go.sum"
 tools:
   - mcp__go-guardian__query_knowledge
-  - mcp__go-guardian__check_staleness
-  - mcp__go-guardian__get_pattern_stats
-  - mcp__go-guardian__get_health_trends
-  - mcp__go-guardian__check_owasp
-  - mcp__go-guardian__check_deps
-  - mcp__go-guardian__report_finding
-  - mcp__go-guardian__get_session_findings
+  - mcp__go-guardian__suggest_fix
+  - Read
+  - Bash
+  - Grep
+  - Glob
 ---
 
-# /go — Go Guardian Orchestrator
+# /go — Go Guardian Orchestrator (MoE Gating)
 
-You MUST call MCP tools directly. Do NOT delegate to a subagent for MCP calls — they only work in the main conversation.
+This skill is the central entry point for Go work. It operates as a
+**Mixture-of-Experts** gating network: it classifies intent, runs a
+single unified scan via `go-guardian scan --all`, reads the resulting
+markdown artifacts in `.go-guardian/`, and then spawns **only** the
+reviewer agents whose dimensions have non-empty findings. Experts with an
+empty work queue are not activated. Do NOT delegate routing to a subagent —
+the classifier must run in the main conversation so it stays near-zero
+latency.
 
-## Intent Classification
+## Explicit Subcommand Routing
 
-Use the `go-guardian:orchestrator` agent definition (loaded in conversation context) for the full intent classification table, force routes, and context injection rules.
+If the user invoked `/go` with an explicit subcommand, route directly to
+the matching per-dimension skill or beastmode verb and return. The
+four-stage gating pipeline below runs only for argument-less invocations.
 
-**Routing to skills** (preferred — skills also call MCP directly):
-- review → invoke `/go-review`
-- security → invoke `/go-security`
-- lint → invoke `/go-lint`
-- test → invoke `/go-test`
-- patterns → invoke `/go-patterns`
-- renovate → invoke `/renovate`
+**Per-dimension skills** — delegate and return:
+- `review` → invoke `/go-review`
+- `security` → invoke `/go-security`
+- `lint` → invoke `/go-lint`
+- `test` → invoke `/go-test`
+- `patterns` → invoke `/go-patterns`
+- `renovate` → invoke `/renovate`
 
-**Routing to beastmode** (feature lifecycle):
-- design → invoke `/beastmode:design <topic>`
-- plan → invoke `/beastmode:plan <epic-name>`
-- implement → invoke `/beastmode:implement <epic-name>-<feature-name>`
-- validate → invoke `/beastmode:validate <epic-name>`
+**Beastmode lifecycle** — delegate and return:
+- `design` → invoke `/beastmode:design <topic>`
+- `plan` → invoke `/beastmode:plan <epic-name>`
+- `implement` → invoke `/beastmode:implement <epic-name>-<feature-name>`
+- `validate` → invoke `/beastmode:validate <epic-name>`
 
 Keywords that trigger beastmode routing:
 - **design**: "design", "new feature", "add feature", "feature request", "PRD", "spec"
@@ -42,23 +49,16 @@ Keywords that trigger beastmode routing:
 - **implement**: "implement", "build", "develop", "code this", "create feature"
 - **validate**: "validate", "verify", "release check", "pre-release"
 
-When beastmode intent is detected, pass the remaining arguments as the topic/epic name.
-Example: `/go design a caching layer` → `/beastmode:design a caching layer`
+**Documentation routing** — delegate and return:
+- `docs` → invoke `/doc-generate`
+- `explain` → invoke `/code-explain`
+- `changelog` → invoke `/changelog-automation`
+- `docs --full` → invoke `docs-architect` agent, then `mermaid-expert`, then `reference-builder`
+- `diagram` → invoke `mermaid-expert` agent
+- `adr` → invoke `/architecture-decision-records`
+- `api-docs` → invoke `/openapi-spec-generation`
 
-**Routing to documentation** (code-documentation + documentation-generation plugins):
-
-Basic docs:
-- docs → invoke `/doc-generate` — README, architecture overview, code documentation
-- explain → invoke `/code-explain` — code explanation with visual diagrams and step-by-step breakdowns
-- changelog → invoke `/changelog-automation` — generate changelog from git history
-
-Extended docs:
-- docs --full → invoke `docs-architect` agent for comprehensive technical manual (10-100+ pages), then `mermaid-expert` agent for architecture diagrams, then `reference-builder` agent for API reference
-- diagram → invoke `mermaid-expert` agent — architecture diagrams, flowcharts, ERDs, sequence diagrams
-- adr → invoke `/architecture-decision-records` — document architectural decisions in ADR format
-- api-docs → invoke `/openapi-spec-generation` — generate OpenAPI 3.1 spec from Go code
-
-Keywords that trigger documentation routing:
+Keywords:
 - **docs**: "docs", "documentation", "document", "readme", "generate docs"
 - **docs --full**: "full docs", "comprehensive docs", "technical manual", "ebook"
 - **explain**: "explain", "how does this work", "walk me through", "what does this do"
@@ -67,40 +67,142 @@ Keywords that trigger documentation routing:
 - **api-docs**: "API docs", "OpenAPI", "swagger", "API reference", "API spec"
 - **changelog**: "changelog", "release notes", "what changed"
 
-## Full Scan (no args on existing project)
+## Full Scan — MoE Gating Pipeline
 
-When invoked with no arguments on a project with `go.mod`, execute the full scan directly:
+When invoked with no subcommand on a project containing `go.mod`, run the
+four-stage gating pipeline. This is the hot path; it must stay fast.
 
-### Phase 1: MCP + Automated Tools
-1. **check_staleness** — if stale scans exist, report them first
-2. Announce: "Running full Go Guardian scan..."
-3. Run via Bash:
-   - `golangci-lint run ./...` (use project's `.golangci.yml` or template)
-   - `go vet ./...`
-   - `go test -race ./... -count=1`
-   - `govulncheck ./...`
-4. **check_owasp** — call with project root path
-5. **check_deps** — read go.mod, extract modules, call with modules array
-6. **query_knowledge** — get anti-pattern context
+### Stage 1: Intent Classification (rule-based, deterministic)
 
-### Phase 2: Deep Analysis via agent-teams
+Classify which Go review dimensions are relevant to this session. Use a
+**rule-based** classifier — lookup tables and regex only, **no LLM call**.
+`/go` runs near the top of every relevant session; an LLM classification
+round-trip would defeat the latency goal this feature exists to enforce.
+The classifier must be deterministic so repeat invocations on the same
+input produce the same routing decision.
 
-After MCP and automated tools complete, invoke agent-teams for deep manual analysis:
+Two signals feed the classifier:
 
+**Signal A — user message keywords.** Match keywords and phrases in the
+user's message against dimension hints:
+
+| Dimension | Keywords |
+|-----------|----------|
+| review    | "review", "audit", "look at" |
+| security  | "security", "auth", "crypto", "secret", "token", "password", "owasp", "cve" |
+| lint      | "lint", "format", "style", "golangci" |
+| test      | "test", "coverage", "race", "flake", "fixture" |
+| patterns  | "pattern", "anti-pattern", "architecture", "design", "smell" |
+| deps      | "deps", "dependency", "vuln", "govulncheck", "go.mod", "upgrade" |
+| staleness | "stale", "freshness", "rescan" |
+| renovate  | "renovate", "renovate.json", "dependency bot" |
+
+**Signal B — changed files via git state.** Run `git diff --name-only HEAD`
+via Bash and bias dimensions from path prefixes and extensions:
+
+| Path signal | Biases ON |
+|-------------|-----------|
+| `crypto/`, `auth/`, `internal/sql/`, `*secrets*`, `*.pem` | security |
+| `*_test.go` | test |
+| `Dockerfile`, `*.Dockerfile` | patterns, security |
+| `Chart.yaml`, `values.yaml`, `templates/*.yaml` | patterns, security |
+| `*.go`, `go.mod`, `go.sum` (general) | review, lint, patterns |
+| `go.mod`, `go.sum` | deps |
+| `renovate.json`, `.renovaterc*` | renovate |
+| only `README.md`, `docs/**`, `*.md` | (no Go dimensions — return early) |
+
+**Emit the relevant set.** Union the two signals into a set drawn from
+`{review, security, lint, test, patterns, deps, staleness, renovate}`.
+If the union is empty (e.g. "explain this Python script"), print "no Go
+dimensions relevant" and return immediately — do NOT run the scan.
+
+### Stage 2: Single Unified Scan
+
+Run exactly once per `/go` invocation via Bash:
+
+```bash
+go-guardian scan --all
 ```
-/team-spawn security
-```
-Spawns 4 parallel security reviewers (OWASP, auth, deps, config).
 
-```
-/agent-teams:team-review . --reviewers performance,architecture,testing
-```
-Spawns 3 parallel reviewers for performance, architecture, and testing dimensions.
+This command is warm-start cached by the SQLite file-hash cache in the
+`go-guardian` binary; a second run on unchanged source returns in
+milliseconds. The scan produces six markdown artifacts in `.go-guardian/`
+that drive the Stage 3 gating decision:
 
-### Phase 3: Consolidate Report
-1. Merge MCP findings + automated tool output + agent-teams findings
-2. Deduplicate (same file:line → keep most detailed)
-3. **get_pattern_stats** — show learning summary
-4. **get_health_trends** — append trends section
+- `.go-guardian/owasp-findings.md`
+- `.go-guardian/dep-vulns.md`
+- `.go-guardian/staleness.md`
+- `.go-guardian/pattern-stats.md`
+- `.go-guardian/health-trends.md`
+- `.go-guardian/session-findings.md`
 
-Consolidate all findings into a single report using the format from the orchestrator agent definition.
+Do NOT spawn any review agent in this stage — the orchestrator itself is
+doing the scan. Agents only get spawned after Stage 3 decides they have
+work to do.
+
+### Stage 3: Empty-Findings Short-Circuit (the MoE Gate)
+
+For each dimension in the relevant set from Stage 1, read the matching
+artifact file and decide whether to spawn its reviewer. The mapping from
+dimension to artifact to spawn target:
+
+| Dimension | Artifact                             | Spawn target   |
+|-----------|--------------------------------------|----------------|
+| review    | `.go-guardian/session-findings.md`   | `/go-review`   |
+| security  | `.go-guardian/owasp-findings.md`     | `/go-security` |
+| deps      | `.go-guardian/dep-vulns.md`          | `/go-security` |
+| staleness | `.go-guardian/staleness.md`          | (report only)  |
+| patterns  | `.go-guardian/pattern-stats.md`      | `/go-patterns` |
+| lint      | `.go-guardian/session-findings.md`   | `/go-lint`     |
+| test      | `.go-guardian/session-findings.md`   | `/go-test`     |
+| renovate  | (renovate.json validation)           | `/renovate`    |
+
+**Emptiness test.** A findings file is "empty" if, after trimming
+whitespace, it contains no finding entries — the file may still carry a
+header or a "no findings detected" sentinel line. Use `Grep` or a plain
+`Read` to check for finding markers (severity labels like `HIGH`,
+`CRITICAL`, `MEDIUM`, `LOW`, or `file:line` citations).
+
+**Gating rule.** For each relevant dimension whose artifact is empty, do
+**not** spawn the reviewer — record the skip with reason "empty findings
+artifact". For each relevant dimension whose artifact has findings,
+invoke the matching per-dimension skill via slash command. Each spawned
+skill reads the same scan artifacts (never re-running the scan) and
+drops its own refined findings into `.go-guardian/inbox/` as markdown
+documents, which the Stop hook flushes into the knowledge base at session
+end.
+
+Use `query_knowledge` to pull learned patterns relevant to the spawned
+dimensions. Use `suggest_fix` when the orchestrator wants to offer an
+inline fix preview before spawning `/go-review`.
+
+### Stage 4: Run Report
+
+After the pipeline completes, print a concise run report naming:
+
+1. **Relevant dimensions** — with a one-line classifier reason per
+   dimension (e.g. `security: keyword "auth" matched`).
+2. **Irrelevant dimensions** — with the reason each was excluded (e.g.
+   `deps: no go.mod/go.sum changes`).
+3. **Spawned reviewers** — with the findings count that triggered each
+   spawn.
+4. **Skipped reviewers** — with "empty findings artifact" as the reason.
+5. **Wall-clock cost** — total duration of the `/go` invocation.
+
+The Stop hook at `hooks/hooks.json` ingests `.go-guardian/inbox/` via
+`go-guardian ingest` regardless of whether any reviewer spawned, so the
+learning loop stays closed even on a clean run.
+
+## Idempotence
+
+A second `/go` invocation on unchanged source must be a small fraction of
+the first run's wall-clock time. This is enforced by the warm-start
+cache in `go-guardian scan --all` — the scan reads file hashes from
+SQLite and skips any file whose content has not changed since the last
+scan. The classifier, artifact reads, and gating logic are stateless and
+cheap, so the only non-negligible cost on a repeat run is the incremental
+scan itself, which on unchanged source is near-zero.
+
+Use the `go-guardian:orchestrator` agent definition (loaded in
+conversation context) for the full intent classification table, force
+routes, and context injection rules.
