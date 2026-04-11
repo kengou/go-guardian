@@ -71,27 +71,27 @@ func dispatchAdminWithContext(
 		return 2
 	}
 	if len(flags.Args()) != 0 {
-		fmt.Fprintln(stderr, "go-guardian admin: unexpected positional arguments")
+		_, _ = fmt.Fprintln(stderr, "go-guardian admin: unexpected positional arguments")
 		return 2
 	}
 	if *port < 0 || *port > 65535 {
-		fmt.Fprintf(stderr, "go-guardian admin: --port %d out of range [0, 65535]\n", *port)
+		_, _ = fmt.Fprintf(stderr, "go-guardian admin: --port %d out of range [0, 65535]\n", *port)
 		return 2
 	}
 
 	// Ensure the .go-guardian/ directory exists so db.NewStore can create
 	// guardian.db on a fresh project. 0o700 matches the rest of the codebase.
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o700); err != nil {
-		fmt.Fprintf(stderr, "go-guardian admin: mkdir %s: %v\n", filepath.Dir(*dbPath), err)
+		_, _ = fmt.Fprintf(stderr, "go-guardian admin: mkdir %s: %v\n", filepath.Dir(*dbPath), err)
 		return 1
 	}
 
 	store, err := db.NewStore(*dbPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "go-guardian admin: open db %s: %v\n", *dbPath, err)
+		_, _ = fmt.Fprintf(stderr, "go-guardian admin: open db %s: %v\n", *dbPath, err)
 		return 1
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Read session ID from .go-guardian/session-id (same convention main.go
 	// uses for the MCP stdio server). Missing file is fine — admin.handleDashboard
@@ -115,7 +115,7 @@ func dispatchAdminWithContext(
 	addr := "127.0.0.1:" + strconv.Itoa(*port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Fprintf(stderr, "go-guardian admin: bind %s: %v\n", addr, err)
+		_, _ = fmt.Fprintf(stderr, "go-guardian admin: bind %s: %v\n", addr, err)
 		return 1
 	}
 	// listener ownership passes to http.Server.Serve; we do not Close() it
@@ -125,8 +125,8 @@ func dispatchAdminWithContext(
 	boundAddr := listener.Addr().String()
 	url := "http://" + boundAddr
 
-	fmt.Fprintf(stdout, "admin UI: %s\n", url)
-	fmt.Fprintln(stdout, "press Ctrl-C to stop")
+	_, _ = fmt.Fprintf(stdout, "admin UI: %s\n", url)
+	_, _ = fmt.Fprintln(stdout, "press Ctrl-C to stop")
 
 	httpSrv := &http.Server{
 		Handler:           srv,
@@ -146,7 +146,7 @@ func dispatchAdminWithContext(
 
 	if *openBrowser {
 		if oErr := openInBrowser(url); oErr != nil {
-			fmt.Fprintf(stderr, "go-guardian admin: --open failed (continuing): %v\n", oErr)
+			_, _ = fmt.Fprintf(stderr, "go-guardian admin: --open failed (continuing): %v\n", oErr)
 		}
 	}
 
@@ -157,7 +157,7 @@ func dispatchAdminWithContext(
 		// Expected termination path. Fall through to shutdown.
 	case serveErr := <-serveErrCh:
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			fmt.Fprintf(stderr, "go-guardian admin: serve error: %v\n", serveErr)
+			_, _ = fmt.Fprintf(stderr, "go-guardian admin: serve error: %v\n", serveErr)
 			return 1
 		}
 		// Serve returned ErrServerClosed without a prior Shutdown call.
@@ -171,7 +171,7 @@ func dispatchAdminWithContext(
 	defer cancel()
 
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		fmt.Fprintf(stderr, "go-guardian admin: graceful shutdown error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "go-guardian admin: graceful shutdown error: %v\n", err)
 		// Force-close any remaining connections.
 		_ = httpSrv.Close()
 	}
@@ -180,7 +180,7 @@ func dispatchAdminWithContext(
 	// Shutdown causes Serve to return http.ErrServerClosed, which we ignore.
 	<-serveErrCh
 
-	fmt.Fprintln(stdout, "admin UI: stopped")
+	_, _ = fmt.Fprintln(stdout, "admin UI: stopped")
 	return 0
 }
 

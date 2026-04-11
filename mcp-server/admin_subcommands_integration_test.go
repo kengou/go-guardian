@@ -215,7 +215,7 @@ func TestAdminSubcommands_IntegrationScenarios(t *testing.T) {
 			run.cancel()
 			t.Fatalf("dashboard probe failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		var payload map[string]any
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -285,7 +285,7 @@ func TestAdminSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("pre-bind listener: %v", err)
 		}
-		defer blocker.Close()
+		defer func() { _ = blocker.Close() }()
 		port := blocker.Addr().(*net.TCPAddr).Port
 
 		run := runAdminWithContext(t, "--db", dbPath, "--port", itoa(port))

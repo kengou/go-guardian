@@ -87,7 +87,7 @@ func TestCLIFoundation_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("post-migration NewStore: %v", err)
 		}
-		defer store2.Close()
+		defer func() { _ = store2.Close() }()
 		patterns, err := store2.QueryPatterns("*.go", "rows.Close", 10)
 		if err != nil {
 			t.Fatalf("QueryPatterns: %v", err)
@@ -134,7 +134,7 @@ func TestCLIFoundation_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("post NewStore: %v", err)
 		}
-		defer store2.Close()
+		defer func() { _ = store2.Close() }()
 		history, err := store2.GetScanHistory("testproj")
 		if err != nil {
 			t.Fatalf("GetScanHistory: %v", err)

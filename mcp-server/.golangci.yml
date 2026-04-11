@@ -1,0 +1,36 @@
+version: "2"
+
+# golangci-lint config for go-guardian MCP server.
+#
+# The CI workflow runs staticcheck as a hard gate; this config is the
+# complementary golangci-lint surface (run locally with `golangci-lint run ./...`).
+#
+# Policy:
+#   - errcheck is on, but writes to stdout/stderr and Close() on common cleanup
+#     types are excluded because the error channel is the very thing that
+#     failed — there is no meaningful handling beyond process exit, which is
+#     already happening in the surrounding code.
+#   - ineffassign / staticcheck / govet stay at defaults.
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        # CLI output — writes to stdout/stderr whose error channel is the
+        # same broken thing we'd report to.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*bytes.Buffer).WriteString
+        - (*strings.Builder).WriteString
+        - (*strings.Builder).WriteRune
+        - (*strings.Builder).WriteByte
+        # Cleanup paths — Close() on resources whose lifetime ends with the
+        # surrounding scope. Test files use these exclusively and production
+        # code uses them only on teardown where failure is untestable.
+        - (io.Closer).Close
+        - (*database/sql.DB).Close
+        - (net.Listener).Close
+        # JSON encoding to http.ResponseWriter — error goes to a connection
+        # that is already torn down by the time we could react.
+        - (*encoding/json.Encoder).Encode

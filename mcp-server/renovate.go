@@ -80,7 +80,7 @@ func dispatchRenovateValidate(args []string, stdout, stderr io.Writer) int {
 	if exit != 0 {
 		return exit
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	body, err := tools.RunValidateRenovateConfig(store, configPath)
 	if err != nil {
@@ -88,7 +88,7 @@ func dispatchRenovateValidate(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprint(stdout, body)
+	_, _ = fmt.Fprint(stdout, body)
 	if !strings.HasSuffix(body, "\n") {
 		fmt.Fprintln(stdout)
 	}
@@ -129,7 +129,7 @@ func dispatchRenovateAnalyze(args []string, stdout, stderr io.Writer) int {
 	if exit != 0 {
 		return exit
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	body, err := tools.RunAnalyzeRenovateConfig(store, configPath)
 	if err != nil {
@@ -187,7 +187,7 @@ func dispatchRenovateSuggest(args []string, stdout, stderr io.Writer) int {
 	if exit != 0 {
 		return exit
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	body, err := tools.RunSuggestRenovateRule(store, problem, *configPath)
 	if err != nil {
@@ -228,7 +228,7 @@ func dispatchRenovateQuery(args []string, stdout, stderr io.Writer) int {
 	if exit != 0 {
 		return exit
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	body, err := tools.RunQueryRenovateKnowledge(store, *category, *keyword)
 	if err != nil {
@@ -236,7 +236,7 @@ func dispatchRenovateQuery(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprint(stdout, body)
+	_, _ = fmt.Fprint(stdout, body)
 	if !strings.HasSuffix(body, "\n") {
 		fmt.Fprintln(stdout)
 	}
@@ -265,7 +265,7 @@ func dispatchRenovateStats(args []string, stdout, stderr io.Writer) int {
 	if exit != 0 {
 		return exit
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	body, err := tools.RunGetRenovateStats(store, *configPath)
 	if err != nil {
@@ -273,16 +273,11 @@ func dispatchRenovateStats(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprint(stdout, body)
+	_, _ = fmt.Fprint(stdout, body)
 	if !strings.HasSuffix(body, "\n") {
 		fmt.Fprintln(stdout)
 	}
 	return 0
-}
-
-// renovateCommonOptions captures the flags shared by every verb.
-type renovateCommonOptions struct {
-	dbPath string
 }
 
 // addRenovateCommonFlags attaches the shared --db flag to fs and returns a

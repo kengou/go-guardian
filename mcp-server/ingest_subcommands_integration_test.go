@@ -101,7 +101,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reopen store: %v", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		_, total, err := store.GetAllLintPatterns("", "", "", "", false, 100, 0)
 		if err != nil {
 			t.Fatalf("GetAllLintPatterns: %v", err)
@@ -146,7 +146,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reopen store: %v", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		_, total, err := store.GetAllLintPatterns("", "", "", "", false, 100, 0)
 		if err != nil {
 			t.Fatalf("GetAllLintPatterns: %v", err)
@@ -183,7 +183,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reopen store: %v", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		patterns, _, err := store.GetAllLintPatterns("", "review", "", "", false, 100, 0)
 		if err != nil {
 			t.Fatalf("GetAllLintPatterns: %v", err)
@@ -225,7 +225,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reopen store: %v", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		findings, err := store.GetSessionFindings("sess-test-001", "")
 		if err != nil {
 			t.Fatalf("GetSessionFindings: %v", err)
@@ -346,7 +346,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reopen store: %v", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		_, total, err := store.GetAllLintPatterns("", "", "", "", false, 100, 0)
 		if err != nil {
 			t.Fatalf("GetAllLintPatterns: %v", err)
@@ -368,7 +368,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err := store.InsertLintPattern("manual-rule", "*.go", "seed dont", "seed do", "manual"); err != nil {
 			t.Fatalf("seed InsertLintPattern: %v", err)
 		}
-		store.Close()
+		_ = store.Close()
 
 		writeInboxDoc(t, filepath.Join(inboxDir, "lint-new.md"), map[string]string{
 			"kind": "lint", "rule": "errcheck", "file_glob": "*.go",
@@ -384,7 +384,7 @@ func TestIngestSubcommands_IntegrationScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reopen store: %v", err)
 		}
-		defer store2.Close()
+		defer func() { _ = store2.Close() }()
 		_, total, err := store2.GetAllLintPatterns("", "", "", "", false, 100, 0)
 		if err != nil {
 			t.Fatalf("GetAllLintPatterns: %v", err)

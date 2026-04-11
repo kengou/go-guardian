@@ -105,7 +105,7 @@ func dispatchIngest(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if len(docs) == 0 {
-		fmt.Fprintln(stdout, "go-guardian ingest: nothing to ingest (empty inbox)")
+		_, _ = fmt.Fprintln(stdout, "go-guardian ingest: nothing to ingest (empty inbox)")
 		return 0
 	}
 
@@ -115,7 +115,7 @@ func dispatchIngest(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "go-guardian ingest: open db %s: %v\n", opts.dbPath, err)
 		return 1
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	counts := map[string]int{
 		"lint":          0,
