@@ -1,79 +1,9 @@
 package tools
 
 import (
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
-
-// TestE2ELearnQuerySuggest exercises the full learning loop:
-//
-//  1. learn_from_lint stores a DON'T/DO pattern
-//  2. query_knowledge retrieves it for the same file type
-//  3. suggest_fix matches it when given the bad snippet
-func TestE2ELearnQuerySuggest(t *testing.T) {
-	store := newTestStore(t)
-
-	// -- Step 1: learn --------------------------------------------------------
-	const lintOut = `utils.go:22:5: Error return value of 'rows.Close' is not checked (errcheck)
-`
-	const diff = `diff --git a/utils.go b/utils.go
---- a/utils.go
-+++ b/utils.go
-@@ -20,5 +20,7 @@
- func fetchRows(db *sql.DB) {
--	rows, _ := db.Query("SELECT id FROM users")
--	rows.Close()
-+	rows, err := db.Query("SELECT id FROM users")
-+	if err != nil {
-+		return err
-+	}
-+	defer rows.Close()
- }
-`
-	learnResult := callLearnTool(t, store, diff, lintOut, "e2e-project")
-
-	if int(learnResult["learned"].(float64)) < 1 {
-		t.Fatalf("expected at least 1 learned pattern, got %v", learnResult["learned"])
-	}
-
-	// -- Step 2: query_knowledge ----------------------------------------------
-	queryReq := mcp.CallToolRequest{}
-	queryReq.Params.Arguments = map[string]interface{}{
-		"file_path":    "utils.go",
-		"code_context": "rows.Close()",
-	}
-
-	queryResult, err := handleQueryKnowledge(context.Background(), queryReq, store, "")
-	if err != nil {
-		t.Fatalf("handleQueryKnowledge error: %v", err)
-	}
-	if queryResult == "" {
-		t.Fatal("handleQueryKnowledge returned empty result")
-	}
-	if !strings.Contains(queryResult, "errcheck") {
-		t.Errorf("query result should mention 'errcheck', got: %s", queryResult)
-	}
-
-	// -- Step 3: suggest_fix --------------------------------------------------
-	matches, err := findMatches(store, "rows.Close()", "")
-	if err != nil {
-		t.Fatalf("findMatches error: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatal("suggest_fix returned no matches for a pattern that was just learned")
-	}
-
-	formatted := formatSuggestMatches(matches)
-	if !strings.Contains(formatted, "errcheck") {
-		t.Errorf("suggest_fix output should mention 'errcheck', got: %s", formatted)
-	}
-	if !strings.Contains(formatted, "rows.Close") {
-		t.Errorf("suggest_fix output should mention 'rows.Close', got: %s", formatted)
-	}
-}
 
 // TestE2EStalenessAfterScan verifies that after UpdateScanHistory the
 // checkStaleness function no longer reports that scan type as stale.

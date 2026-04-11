@@ -2,7 +2,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,18 +12,16 @@ import (
 
 	"github.com/kengou/go-guardian/mcp-server/db"
 	"github.com/kengou/go-guardian/mcp-server/owasp"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // RunCheckOWASP scans scanPath for OWASP findings and returns a formatted
 // report. It performs the same store inserts (OWASP findings, scan history,
-// scan snapshot) as the MCP handler, so callers get identical side-effects.
-// scanPath is validated to be within projectRoot — paths outside it return
-// an error without any store mutations.
+// scan snapshot) as the prior MCP handler, so callers get identical
+// side-effects. scanPath is validated to be within projectRoot — paths
+// outside it return an error without any store mutations.
 //
-// This function is the CLI-callable surface for check_owasp and is invoked
-// by the go-guardian scan subcommand (wave 2: scan-subcommands feature).
-// The MCP RegisterCheckOWASP handler is now a thin wrapper around it.
+// This function is the CLI-callable surface for OWASP scanning and is
+// invoked by the go-guardian scan subcommand.
 func RunCheckOWASP(store *db.Store, projectRoot, scanPath string) (string, error) {
 	scanPath = strings.TrimSpace(scanPath)
 	if scanPath == "" {
@@ -70,30 +67,6 @@ func RunCheckOWASP(store *db.Store, projectRoot, scanPath string) (string, error
 	_ = store.InsertScanSnapshot("owasp", scanPath, len(findings), buildOWASPSnapshotDetail(findings))
 
 	return formatFindings(scanPath, findings), nil
-}
-
-// RegisterCheckOWASP registers the check_owasp MCP tool.
-// projectRoot is the absolute path to the project being guarded;
-// scan paths are validated to be within this root (fixes FINDING-07).
-func RegisterCheckOWASP(s ToolRegistrar, store *db.Store, projectRoot string) {
-	tool := mcp.NewTool(
-		"check_owasp",
-		mcp.WithDescription("Scan Go source files for OWASP Top 10 security issues (A02, A03, A05, A09, A10)."),
-		mcp.WithString(
-			"path",
-			mcp.Required(),
-			mcp.Description("File path or directory to scan for OWASP issues."),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		rawPath := req.GetString("path", "")
-		result, err := RunCheckOWASP(store, projectRoot, rawPath)
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("error: %v", err)), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	})
 }
 
 // buildOWASPSnapshotDetail creates a JSON detail blob from OWASP findings,

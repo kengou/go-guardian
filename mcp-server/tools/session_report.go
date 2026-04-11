@@ -1,12 +1,10 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // RunReportFinding records a cross-agent session finding and returns a
@@ -46,48 +44,3 @@ func RunReportFinding(store *db.Store, sessionID, agent, findingType, filePath, 
 	return fmt.Sprintf("Finding #%d recorded (%s/%s: %s)", id, agent, severity, findingType), nil
 }
 
-// RegisterReportFinding registers the report_finding MCP tool.
-// sessionID is captured in the closure so agents don't need to pass it.
-func RegisterReportFinding(s ToolRegistrar, store *db.Store, sessionID string) {
-	tool := mcp.NewTool(
-		"report_finding",
-		mcp.WithDescription(
-			"Report a finding for cross-agent visibility within the current scan session. "+
-				"Other agents can query these findings to focus their analysis on flagged areas.",
-		),
-		mcp.WithString("agent",
-			mcp.Required(),
-			mcp.Description("Agent reporting the finding (e.g. reviewer, security, linter, tester)"),
-		),
-		mcp.WithString("finding_type",
-			mcp.Required(),
-			mcp.Description("Type of finding (e.g. race-condition, sql-injection, error-handling, missing-test)"),
-		),
-		mcp.WithString("file_path",
-			mcp.Description("File path where the finding was detected (optional)"),
-		),
-		mcp.WithString("description",
-			mcp.Required(),
-			mcp.Description("Human-readable description of the finding"),
-		),
-		mcp.WithString("severity",
-			mcp.Description("Severity: CRITICAL, HIGH, MEDIUM, LOW (default: MEDIUM)"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		text, err := RunReportFinding(
-			store,
-			sessionID,
-			req.GetString("agent", ""),
-			req.GetString("finding_type", ""),
-			req.GetString("file_path", ""),
-			req.GetString("description", ""),
-			req.GetString("severity", ""),
-		)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("report_finding: %v", err)), nil
-		}
-		return mcp.NewToolResultText(text), nil
-	})
-}

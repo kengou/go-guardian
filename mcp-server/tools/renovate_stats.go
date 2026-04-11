@@ -1,27 +1,15 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
-// RegisterGetRenovateStats registers the get_renovate_stats tool on the MCP server.
-func RegisterGetRenovateStats(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("get_renovate_stats",
-		mcp.WithDescription("Dashboard showing rule coverage, learned preferences, and config score history"),
-		mcp.WithString("config_path", mcp.Description("Config path for score history (optional)")),
-	)
-	s.AddTool(tool, handleGetRenovateStats(store))
-}
-
 // RunGetRenovateStats produces the Renovate dashboard report. It is the
-// package-level entry point used by both the MCP handler and the CLI.
+// package-level entry point used by the CLI.
 func RunGetRenovateStats(store *db.Store, configPath string) (string, error) {
 	var out strings.Builder
 
@@ -110,18 +98,6 @@ func RunGetRenovateStats(store *db.Store, configPath string) (string, error) {
 	}
 
 	return out.String(), nil
-}
-
-func handleGetRenovateStats(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		configPath := request.GetString("config_path", "")
-
-		result, err := RunGetRenovateStats(store, configPath)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	}
 }
 
 // renovateComputeTrend examines the most recent scores (ordered newest-first) and

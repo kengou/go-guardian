@@ -1,41 +1,22 @@
 package tools
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// callValidate is a test helper that invokes the validate handler directly.
-func callValidate(t *testing.T, configPath string) *mcp.CallToolResult {
+// callValidate is a test helper that invokes RunValidateRenovateConfig directly.
+// It returns (text, isError) where isError is true when the underlying call
+// returned an error (e.g. missing file).
+func callValidate(t *testing.T, configPath string) (string, bool) {
 	t.Helper()
-	handler := handleValidateRenovateConfig(nil)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]any{
-		"config_path": configPath,
-	}
-	result, err := handler(context.Background(), req)
+	text, err := RunValidateRenovateConfig(nil, configPath)
 	if err != nil {
-		t.Fatalf("handler returned unexpected error: %v", err)
+		return err.Error(), true
 	}
-	return result
-}
-
-// resultText extracts the text content from a CallToolResult.
-func resultText(t *testing.T, result *mcp.CallToolResult) string {
-	t.Helper()
-	if len(result.Content) == 0 {
-		t.Fatal("result has no content")
-	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
-	return tc.Text
+	return text, false
 }
 
 func writeTestConfig(t *testing.T, name, content string) string {
@@ -53,10 +34,10 @@ func TestValidateConfig(t *testing.T) {
 	t.Setenv("RENOVATE_TOKEN", "")
 
 	tests := []struct {
-		name       string
-		config     string
-		wantErr    bool // expect IsError on the result
-		wantContain []string
+		name           string
+		config         string
+		wantErr        bool // expect the underlying call to return an error
+		wantContain    []string
 		wantNotContain []string
 	}{
 		{
@@ -203,13 +184,11 @@ func TestValidateConfig(t *testing.T) {
 				configPath = writeTestConfig(t, "renovate.json", tt.config)
 			}
 
-			result := callValidate(t, configPath)
-
-			text := resultText(t, result)
+			text, isErr := callValidate(t, configPath)
 
 			if tt.wantErr {
-				if !result.IsError {
-					t.Errorf("expected IsError=true, got false.\nOutput:\n%s", text)
+				if !isErr {
+					t.Errorf("expected error, got success.\nOutput:\n%s", text)
 				}
 			}
 
@@ -225,25 +204,6 @@ func TestValidateConfig(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestValidateConfig_MissingConfigPath(t *testing.T) {
-	handler := handleValidateRenovateConfig(nil)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]any{}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler returned unexpected error: %v", err)
-	}
-
-	text := resultText(t, result)
-	if !result.IsError {
-		t.Error("expected IsError=true for missing config_path")
-	}
-	if !strings.Contains(text, "config_path is required") {
-		t.Errorf("expected 'config_path is required' in output, got: %s", text)
 	}
 }
 

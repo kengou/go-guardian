@@ -1,34 +1,14 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
-// RegisterRenovateQueryKnowledge registers the query_renovate_knowledge MCP tool on the server.
-func RegisterRenovateQueryKnowledge(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("query_renovate_knowledge",
-		mcp.WithDescription(
-			"Browse the Renovate knowledge base. Filter by category or search "+
-				"by keyword to find rules and learned preferences.",
-		),
-		mcp.WithString("category",
-			mcp.Description("Filter by category: automerge, grouping, scheduling, security, custom_datasources, automation"),
-		),
-		mcp.WithString("query",
-			mcp.Description("Free-text search across rule titles and descriptions"),
-		),
-	)
-	s.AddTool(tool, handleRenovateQueryKnowledge(store))
-}
-
 // RunQueryRenovateKnowledge queries the Renovate knowledge base by category and/or
-// keyword. It is the package-level entry point used by both the MCP handler and the CLI.
+// keyword. It is the package-level entry point used by the CLI.
 func RunQueryRenovateKnowledge(store *db.Store, category, query string) (string, error) {
 	category = strings.TrimSpace(category)
 	query = strings.TrimSpace(query)
@@ -121,19 +101,6 @@ func RunQueryRenovateKnowledge(store *db.Store, category, query string) (string,
 	}
 
 	return formatRenovateQueryResults(category, query, rules, prefs), nil
-}
-
-func handleRenovateQueryKnowledge(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		category := request.GetString("category", "")
-		query := request.GetString("query", "")
-
-		result, err := RunQueryRenovateKnowledge(store, category, query)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	}
 }
 
 // formatRenovateQueryResults renders the knowledge query output.

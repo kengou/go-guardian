@@ -275,25 +275,10 @@ func main() {
 		}
 	}
 
-	tools.RegisterLearnFromLint(reg, store)
 	tools.RegisterQueryKnowledge(reg, store, sessionID)
-	tools.RegisterCheckOWASP(reg, store, *projectDir)
-	tools.RegisterCheckStaleness(reg, store)
-	tools.RegisterCheckDeps(reg, store)
-	tools.RegisterGetPatternStats(reg, store)
 	tools.RegisterSuggestFix(reg, store)
-	tools.RegisterLearnFromReview(reg, store)
-	tools.RegisterGetHealthTrends(reg, store)
-	tools.RegisterReportFinding(reg, store, sessionID)
-	tools.RegisterGetSessionFindings(reg, store, sessionID)
-	tools.RegisterValidateRenovateConfig(reg, store)
-	tools.RegisterAnalyzeRenovateConfig(reg, store)
-	tools.RegisterSuggestRenovateRule(reg, store)
-	tools.RegisterLearnRenovatePreference(reg, store)
-	tools.RegisterRenovateQueryKnowledge(reg, store)
-	tools.RegisterGetRenovateStats(reg, store)
 
-	log.Printf("registered 17 tools: learn_from_lint, learn_from_review, query_knowledge, check_owasp, check_staleness, check_deps, get_pattern_stats, suggest_fix, get_health_trends, report_finding, get_session_findings, validate_renovate_config, analyze_renovate_config, suggest_renovate_rule, learn_renovate_preference, query_renovate_knowledge, get_renovate_stats\n")
+	log.Printf("registered 2 tools: query_knowledge, suggest_fix\n")
 
 	// Start serving via stdio. ServeStdio handles SIGINT/SIGTERM gracefully.
 	if err := server.ServeStdio(s); err != nil {
@@ -1073,24 +1058,9 @@ func runHealthcheck(dbPath string) int {
 
 	// 5. Tool registration
 	s := server.NewMCPServer("go-guardian", version)
-	tools.RegisterLearnFromLint(s, store)
 	tools.RegisterQueryKnowledge(s, store, "")
-	tools.RegisterCheckOWASP(s, store, ".")
-	tools.RegisterCheckStaleness(s, store)
-	tools.RegisterCheckDeps(s, store)
-	tools.RegisterGetPatternStats(s, store)
 	tools.RegisterSuggestFix(s, store)
-	tools.RegisterLearnFromReview(s, store)
-	tools.RegisterGetHealthTrends(s, store)
-	tools.RegisterReportFinding(s, store, "")
-	tools.RegisterGetSessionFindings(s, store, "")
-	tools.RegisterValidateRenovateConfig(s, store)
-	tools.RegisterAnalyzeRenovateConfig(s, store)
-	tools.RegisterSuggestRenovateRule(s, store)
-	tools.RegisterLearnRenovatePreference(s, store)
-	tools.RegisterRenovateQueryKnowledge(s, store)
-	tools.RegisterGetRenovateStats(s, store)
-	pass("tools", "17 tools registered")
+	pass("tools", "2 tools registered")
 
 	// 6. Environment
 	if os.Getenv("GO_GUARDIAN_SESSION_ID") != "" {

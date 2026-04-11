@@ -1,13 +1,11 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // RunGetPatternStats returns a formatted dashboard of lint patterns, OWASP
@@ -18,31 +16,6 @@ func RunGetPatternStats(store *db.Store, project string) (string, error) {
 		return "", fmt.Errorf("failed to get stats: %w", err)
 	}
 	return formatPatternStats(stats), nil
-}
-
-// RegisterGetPatternStats registers the get_pattern_stats MCP tool with the given server.
-func RegisterGetPatternStats(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool(
-		"get_pattern_stats",
-		mcp.WithDescription(
-			"Return a dashboard-style summary of the go-guardian knowledge base: "+
-				"top lint patterns by frequency, OWASP posture, anti-pattern counts, "+
-				"and recent scan history. Optionally scoped to a specific project.",
-		),
-		mcp.WithString("project",
-			mcp.Description("Optional project identifier; if empty, returns global stats"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		project := req.GetString("project", "")
-
-		text, err := RunGetPatternStats(store, project)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(text), nil
-	})
 }
 
 // formatPatternStats renders a PatternStats as a human-readable dashboard.

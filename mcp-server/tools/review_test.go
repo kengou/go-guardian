@@ -1,47 +1,41 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/kengou/go-guardian/mcp-server/db"
 )
 
-// callReviewTool invokes the learn_from_review handler directly and returns
-// the decoded JSON result map.
-func callReviewTool(t *testing.T, store interface{ Close() error }, handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]interface{}) (map[string]interface{}, bool) {
+// callReviewTool invokes RunLearnFromReview directly and returns the decoded
+// JSON result map. The second return value is true if the call produced an
+// error, in which case the map has an "error" key with the error message.
+func callReviewTool(t *testing.T, store *db.Store, args map[string]interface{}) (map[string]interface{}, bool) {
 	t.Helper()
 
-	req := mcp.CallToolRequest{}
-	req.Params.Name = "learn_from_review"
-	req.Params.Arguments = args
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("handler returned nil result")
-	}
-	if result.IsError {
-		tc, ok := mcp.AsTextContent(result.Content[0])
-		if ok {
-			return map[string]interface{}{"error": tc.Text}, true
+	getStr := func(key string) string {
+		if v, ok := args[key].(string); ok {
+			return v
 		}
-		t.Fatalf("unexpected error content type: %+v", result.Content)
+		return ""
 	}
-	if len(result.Content) == 0 {
-		t.Fatal("result has no content")
-	}
-	tc, ok := mcp.AsTextContent(result.Content[0])
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
+
+	result, err := RunLearnFromReview(
+		store,
+		getStr("description"),
+		getStr("severity"),
+		getStr("category"),
+		getStr("dont_code"),
+		getStr("do_code"),
+		getStr("file_path"),
+	)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}, true
 	}
 
 	var out map[string]interface{}
-	if err := json.Unmarshal([]byte(tc.Text), &out); err != nil {
-		t.Fatalf("unmarshal result JSON %q: %v", tc.Text, err)
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("unmarshal result JSON %q: %v", result, err)
 	}
 	return out, false
 }
@@ -172,9 +166,8 @@ func TestLearnFromReview(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTestStore(t)
-			handler := learnFromReviewHandler(store)
 
-			out, isErr := callReviewTool(t, store, handler, tc.args)
+			out, isErr := callReviewTool(t, store, tc.args)
 
 			if tc.wantError {
 				if !isErr {
@@ -245,7 +238,6 @@ func TestLearnFromReview(t *testing.T) {
 
 func TestLearnFromReviewDedup(t *testing.T) {
 	store := newTestStore(t)
-	handler := learnFromReviewHandler(store)
 
 	args := map[string]interface{}{
 		"description": "bare error return",
@@ -257,8 +249,8 @@ func TestLearnFromReviewDedup(t *testing.T) {
 	}
 
 	// Call twice with same params.
-	callReviewTool(t, store, handler, args)
-	callReviewTool(t, store, handler, args)
+	callReviewTool(t, store, args)
+	callReviewTool(t, store, args)
 
 	// Verify frequency incremented.
 	patterns, err := store.QueryPatterns("*_handler.go", "", 10)
@@ -278,7 +270,6 @@ func TestLearnFromReviewDedup(t *testing.T) {
 
 func TestLearnFromReviewSnippetTruncation(t *testing.T) {
 	store := newTestStore(t)
-	handler := learnFromReviewHandler(store)
 
 	// Create a dont_code snippet >500 chars.
 	longCode := "x := " + string(make([]byte, 600))
@@ -290,7 +281,7 @@ func TestLearnFromReviewSnippetTruncation(t *testing.T) {
 		"do_code":     "short fix",
 	}
 
-	callReviewTool(t, store, handler, args)
+	callReviewTool(t, store, args)
 
 	patterns, err := store.QueryPatterns("", "", 10)
 	if err != nil {

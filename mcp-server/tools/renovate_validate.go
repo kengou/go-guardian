@@ -3,7 +3,6 @@ package tools
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // deprecatedOptions maps deprecated Renovate option names to their recommended replacements.
@@ -24,17 +21,8 @@ var deprecatedOptions = map[string]string{
 	"unpublishSafe":         "use 'extends: [\"npm:unpublishSafe\"]' instead",
 }
 
-// RegisterValidateRenovateConfig registers the validate_renovate_config tool on the MCP server.
-func RegisterValidateRenovateConfig(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("validate_renovate_config",
-		mcp.WithDescription("Validate a Renovate JSON configuration file. Checks syntax, deprecated options, structure, and optionally runs a dry-run if RENOVATE_TOKEN is set."),
-		mcp.WithString("config_path", mcp.Required(), mcp.Description("Path to the Renovate JSON configuration file to validate")),
-	)
-	s.AddTool(tool, handleValidateRenovateConfig(store))
-}
-
 // RunValidateRenovateConfig validates a Renovate configuration file. It is the
-// package-level entry point used by both the MCP handler and the CLI.
+// package-level entry point used by the CLI.
 func RunValidateRenovateConfig(store *db.Store, configPath string) (string, error) {
 	var out strings.Builder
 	var warnings, errs int
@@ -96,21 +84,6 @@ func RunValidateRenovateConfig(store *db.Store, configPath string) (string, erro
 
 	fmt.Fprintf(&out, "\nSummary: %d warning(s), %d error(s)\n", warnings, errs)
 	return out.String(), nil
-}
-
-func handleValidateRenovateConfig(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		configPath, err := request.RequireString("config_path")
-		if err != nil {
-			return mcp.NewToolResultError("config_path is required"), nil
-		}
-
-		result, err := RunValidateRenovateConfig(store, configPath)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	}
 }
 
 // positionFromOffset converts a byte offset into a 1-based line and column.

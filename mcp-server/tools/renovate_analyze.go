@@ -1,15 +1,12 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // renovateSeverityDeduction maps severity levels to the score penalty per finding.
@@ -30,24 +27,8 @@ type renovateFinding struct {
 	Description string `json:"description"`
 }
 
-// RegisterAnalyzeRenovateConfig registers the analyze_renovate_config tool on the MCP server.
-func RegisterAnalyzeRenovateConfig(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("analyze_renovate_config",
-		mcp.WithDescription(
-			"Analyze a Renovate JSON configuration against the guardian rule database "+
-				"and learned preferences. Returns a score (0-100) and grouped findings "+
-				"by severity. The score is persisted for trend tracking.",
-		),
-		mcp.WithString("config_path",
-			mcp.Required(),
-			mcp.Description("Path to the Renovate JSON configuration file to analyze"),
-		),
-	)
-	s.AddTool(tool, handleAnalyzeRenovateConfig(store))
-}
-
 // RunAnalyzeRenovateConfig analyzes a Renovate configuration file against the rule
-// database. It is the package-level entry point used by both the MCP handler and the CLI.
+// database. It is the package-level entry point used by the CLI.
 func RunAnalyzeRenovateConfig(store *db.Store, configPath string) (string, error) {
 	// Read and parse config.
 	data, err := os.ReadFile(configPath)
@@ -127,21 +108,6 @@ func RunAnalyzeRenovateConfig(store *db.Store, configPath string) (string, error
 	}
 
 	return out.String(), nil
-}
-
-func handleAnalyzeRenovateConfig(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		configPath, err := request.RequireString("config_path")
-		if err != nil {
-			return mcp.NewToolResultError("config_path is required"), nil
-		}
-
-		result, err := RunAnalyzeRenovateConfig(store, configPath)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	}
 }
 
 // evaluateRule checks whether a config violates the given rule.

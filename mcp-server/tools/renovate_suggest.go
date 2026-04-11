@@ -1,14 +1,11 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // renovateValidCategories lists the accepted Renovate rule categories.
@@ -48,27 +45,8 @@ func renovateCategoryFromProblem(problem string) string {
 	return ""
 }
 
-// RegisterSuggestRenovateRule registers the suggest_renovate_rule MCP tool on the server.
-func RegisterSuggestRenovateRule(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool("suggest_renovate_rule",
-		mcp.WithDescription(
-			"Suggest Renovate configuration rules for a given problem. "+
-				"Searches the rule database and learned preferences by keyword and category, "+
-				"returning up to 3 matches with DON'T/DO examples.",
-		),
-		mcp.WithString("problem",
-			mcp.Required(),
-			mcp.Description("Description of the Renovate problem (e.g., \"too many PRs\", \"automerge patches\")"),
-		),
-		mcp.WithString("config_path",
-			mcp.Description("Optional path to current renovate.json — if provided, shows a concrete diff of what to change"),
-		),
-	)
-	s.AddTool(tool, handleSuggestRenovateRule(store))
-}
-
 // RunSuggestRenovateRule suggests Renovate configuration rules for a given problem.
-// It is the package-level entry point used by both the MCP handler and the CLI.
+// It is the package-level entry point used by the CLI.
 func RunSuggestRenovateRule(store *db.Store, problem, configPath string) (string, error) {
 	if strings.TrimSpace(problem) == "" {
 		return "", fmt.Errorf("problem is required")
@@ -130,19 +108,6 @@ func RunSuggestRenovateRule(store *db.Store, problem, configPath string) (string
 	ruleCount := len(rules)
 	prefCount := len(prefs)
 	return formatRenovateSuggestions(problem, rules, prefs, configData, ruleCount, prefCount), nil
-}
-
-func handleSuggestRenovateRule(store *db.Store) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		problem := request.GetString("problem", "")
-		configPath := request.GetString("config_path", "")
-
-		result, err := RunSuggestRenovateRule(store, problem, configPath)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	}
 }
 
 // formatRenovateSuggestions renders the suggestion output.

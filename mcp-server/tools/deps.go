@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 const cacheMaxAge = 24 * time.Hour
@@ -64,43 +62,6 @@ func RunCheckDeps(store *db.Store, modules []string) (string, error) {
 	_ = store.InsertScanSnapshot("vuln", "", totalCVEs, buildVulnSnapshotDetail(results))
 
 	return formatResults(results), nil
-}
-
-// RegisterCheckDeps registers the check_deps MCP tool with the given server.
-func RegisterCheckDeps(s ToolRegistrar, store *db.Store) {
-	tool := mcp.NewTool(
-		"check_deps",
-		mcp.WithDescription(
-			"Analyse Go module dependencies for known vulnerabilities using cached CVE data. "+
-				"Accepts a list of module paths and returns a status (PREFER / CHECK LATEST / AVOID / UNKNOWN) "+
-				"for each one, along with any cached CVE details and prior dependency decisions. "+
-				"When no cached data is available, advises using the gateway vuln API tools to fetch live data.",
-		),
-		mcp.WithArray("modules",
-			mcp.Required(),
-			mcp.Description("Go module paths to check, e.g. [\"github.com/gorilla/mux\", \"github.com/gin-gonic/gin\"]"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		raw, _ := req.GetArguments()["modules"].([]interface{})
-		if len(raw) == 0 {
-			return mcp.NewToolResultText("Dependency Analysis:\n\n(no modules provided)"), nil
-		}
-
-		modules := make([]string, 0, len(raw))
-		for _, v := range raw {
-			if modPath, ok := v.(string); ok {
-				modules = append(modules, modPath)
-			}
-		}
-
-		result, err := RunCheckDeps(store, modules)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(result), nil
-	})
 }
 
 // analyseModules queries the store for each module and computes recommendations.

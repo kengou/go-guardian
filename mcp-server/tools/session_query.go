@@ -1,12 +1,10 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // RunGetSessionFindings queries cross-agent session findings with optional
@@ -64,37 +62,3 @@ func RunGetSessionFindings(store *db.Store, sessionID, agent, filePath, findingT
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
 
-// RegisterGetSessionFindings registers the get_session_findings MCP tool.
-// sessionID is captured in the closure so agents don't need to pass it.
-func RegisterGetSessionFindings(s ToolRegistrar, store *db.Store, sessionID string) {
-	tool := mcp.NewTool(
-		"get_session_findings",
-		mcp.WithDescription(
-			"Query findings reported by other agents in the current scan session. "+
-				"Use this to see what other agents have flagged before starting your analysis.",
-		),
-		mcp.WithString("agent",
-			mcp.Description("Filter by reporting agent (e.g. reviewer, security) (optional)"),
-		),
-		mcp.WithString("file_path",
-			mcp.Description("Filter by file path (substring match) (optional)"),
-		),
-		mcp.WithString("finding_type",
-			mcp.Description("Filter by finding type (optional)"),
-		),
-	)
-
-	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		text, err := RunGetSessionFindings(
-			store,
-			sessionID,
-			req.GetString("agent", ""),
-			req.GetString("file_path", ""),
-			req.GetString("finding_type", ""),
-		)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("get_session_findings: %v", err)), nil
-		}
-		return mcp.NewToolResultText(text), nil
-	})
-}

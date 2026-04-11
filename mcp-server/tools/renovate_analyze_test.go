@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/kengou/go-guardian/mcp-server/db"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // writeAnalyzeConfig writes a JSON config to a temp file and returns the path.
@@ -24,32 +22,14 @@ func writeAnalyzeConfig(t *testing.T, content string) string {
 	return p
 }
 
-// callAnalyze invokes the analyze handler and returns the text output.
+// callAnalyze invokes RunAnalyzeRenovateConfig directly and returns (text, isError).
 func callAnalyze(t *testing.T, store *db.Store, configPath string) (string, bool) {
 	t.Helper()
-	handler := handleAnalyzeRenovateConfig(store)
-	req := mcp.CallToolRequest{}
-	req.Params.Name = "analyze_renovate_config"
-	req.Params.Arguments = map[string]interface{}{
-		"config_path": configPath,
-	}
-
-	result, err := handler(context.Background(), req)
+	text, err := RunAnalyzeRenovateConfig(store, configPath)
 	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
+		return err.Error(), true
 	}
-	if result == nil {
-		t.Fatal("handler returned nil result")
-	}
-
-	if len(result.Content) == 0 {
-		t.Fatal("result has no content")
-	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
-	return tc.Text, result.IsError
+	return text, false
 }
 
 func TestAnalyzeConfig(t *testing.T) {
@@ -219,68 +199,24 @@ func TestAnalyzeConfig_MultipleRunsCreateMultipleScores(t *testing.T) {
 	}
 }
 
-func TestAnalyzeConfig_MissingConfigPath(t *testing.T) {
-	store := newRenovateTestStore(t)
-	handler := handleAnalyzeRenovateConfig(store)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
-	if !result.IsError {
-		t.Error("expected IsError=true for missing config_path")
-	}
-	if !strings.Contains(tc.Text, "config_path is required") {
-		t.Errorf("expected 'config_path is required', got: %s", tc.Text)
-	}
-}
-
 func TestAnalyzeConfig_InvalidJSON(t *testing.T) {
 	store := newRenovateTestStore(t)
 	configPath := writeAnalyzeConfig(t, `{not valid json}`)
 
-	handler := handleAnalyzeRenovateConfig(store)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"config_path": configPath,
+	text, isErr := callAnalyze(t, store, configPath)
+	if !isErr {
+		t.Error("expected error for invalid JSON")
 	}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", result.Content[0])
-	}
-	if !result.IsError {
-		t.Error("expected IsError=true for invalid JSON")
-	}
-	if !strings.Contains(tc.Text, "invalid JSON") {
-		t.Errorf("expected 'invalid JSON' error, got: %s", tc.Text)
+	if !strings.Contains(text, "invalid JSON") {
+		t.Errorf("expected 'invalid JSON' error, got: %s", text)
 	}
 }
 
 func TestAnalyzeConfig_NonexistentFile(t *testing.T) {
 	store := newRenovateTestStore(t)
-	handler := handleAnalyzeRenovateConfig(store)
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = map[string]interface{}{
-		"config_path": filepath.Join(t.TempDir(), "does-not-exist.json"),
-	}
-
-	result, err := handler(context.Background(), req)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if !result.IsError {
-		t.Error("expected IsError=true for nonexistent file")
+	_, isErr := callAnalyze(t, store, filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if !isErr {
+		t.Error("expected error for nonexistent file")
 	}
 }
 
@@ -333,8 +269,8 @@ func TestEvaluateRule_DontConfigMatch(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		config     map[string]interface{}
+		name          string
+		config        map[string]interface{}
 		wantViolation bool
 	}{
 		{
