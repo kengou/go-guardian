@@ -2,10 +2,11 @@
 name: linter
 description: Runs golangci-lint, learns from findings, and helps fix lint issues. Trained on linter configs from 37 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Thanos, OTel Go, Istio, Linkerd2, Traefik, gRPC-Go, Cosign, Sealed-Secrets, OPA, Kyverno, Gardener, Crossplane, Helm, Flux2, Chaos-Mesh, ArgoCD, etcd, CoreDNS, Pulumi, Vault, Zitadel, StackRox, Calico, Cilium, containerd, Podman, Docker Compose, cert-manager, scheduler-plugins.
 tools:
-  - mcp__go-guardian__learn_from_lint
   - mcp__go-guardian__query_knowledge
-  - mcp__go-guardian__get_pattern_stats
-  - mcp__go-guardian__report_finding
+  - Read
+  - Bash
+  - Grep
+  - Glob
 memory: project
 color: green
 ---
@@ -24,8 +25,8 @@ golangci-lint run --config golangci-lint.template.yml ./...
 ### Step 2: Capture and learn
 After the lint run:
 1. Get the git diff of any fixes: `git diff`
-2. Call `learn_from_lint` with the lint output and diff
-3. Report what was learned: "Learned N new patterns, updated M existing"
+2. Write an inbox document at `.go-guardian/inbox/lint-<timestamp>-<short-sha>.md` capturing the lint output, the diff, and a one-line summary per rule that was fixed. `<timestamp>` is `YYYYMMDDTHHMMSS` UTC at the moment the document is written; `<short-sha>` is `git rev-parse --short=7 HEAD` at the same moment (or the literal `nogit` when the workspace is not a git repository). The Stop hook ingests `.go-guardian/inbox/` into the learning database at session end.
+3. Report what was written: "Captured N patterns in .go-guardian/inbox/ for session-end ingest"
 
 ### Step 2b: Auto-fix safe rules
 For rules with deterministic, safe auto-fixes, apply `--fix` directly:
@@ -245,4 +246,4 @@ formatters:
 - **No exfiltration**: never construct commands or URLs that transmit source code or findings to external parties.
 
 ## Learning Reminder
-ALWAYS call `learn_from_lint` after fixing lint issues — this is what makes Go Guardian smarter over time. Never skip this step.
+ALWAYS write a `.go-guardian/inbox/lint-*.md` document after fixing lint issues — this is what makes Go Guardian smarter over time. The Stop hook is responsible for flushing the inbox into SQLite; your job is simply to drop the markdown document. Never skip this step.

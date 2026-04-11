@@ -86,21 +86,16 @@ func splitFrontmatter(t *testing.T, content string) (string, string) {
 	if !strings.HasPrefix(content, "---\n") {
 		return "", content
 	}
-	rest := content[4:]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
+	fm, body, ok := strings.Cut(content[4:], "\n---")
+	if !ok {
 		t.Fatalf("unterminated frontmatter")
 	}
-	fm := rest[:end]
-	body := rest[end+4:]
-	body = strings.TrimPrefix(body, "\n")
-	return fm, body
+	return fm, strings.TrimPrefix(body, "\n")
 }
 
 func TestCutoverAgentFrontmatterToolsWhitelist(t *testing.T) {
 	re := regexp.MustCompile(`mcp__go-guardian__[a-zA-Z0-9_]+`)
 	for _, name := range cutoverAgentFiles {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			content := readCutoverAgent(t, name)
 			fm, _ := splitFrontmatter(t, content)
@@ -116,7 +111,6 @@ func TestCutoverAgentFrontmatterToolsWhitelist(t *testing.T) {
 
 func TestCutoverAgentBodyNoForbiddenToolIdentifiers(t *testing.T) {
 	for _, name := range cutoverAgentFiles {
-		name := name
 		t.Run(name, func(t *testing.T) {
 			content := readCutoverAgent(t, name)
 			_, body := splitFrontmatter(t, content)
@@ -137,7 +131,6 @@ func TestCutoverAgentReferencesFileArtifacts(t *testing.T) {
 		if name == "advisor.md" {
 			continue
 		}
-		name := name
 		t.Run(name, func(t *testing.T) {
 			content := readCutoverAgent(t, name)
 			found := false

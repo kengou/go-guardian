@@ -3,9 +3,10 @@ name: orchestrator
 description: Routes /go requests to the correct specialist agent based on intent classification. Trained on patterns from 37 projects including Kubernetes, Prometheus, Grafana, VictoriaMetrics, Perses, Greenhouse, VM Operator, Thanos, OTel Go, Istio, Linkerd2, Traefik, gRPC-Go, Cosign, Sealed-Secrets, OPA, Kyverno, Gardener, Crossplane, Helm, Flux2, Chaos-Mesh, ArgoCD, etcd, CoreDNS, Pulumi, Vault, Zitadel, StackRox, Calico, Cilium, containerd, Podman, Docker Compose, cert-manager, scheduler-plugins.
 tools:
   - mcp__go-guardian__query_knowledge
-  - mcp__go-guardian__check_staleness
-  - mcp__go-guardian__get_pattern_stats
-  - mcp__go-guardian__get_health_trends
+  - Read
+  - Bash
+  - Grep
+  - Glob
 memory: project
 color: yellow
 ---
@@ -187,18 +188,21 @@ The go-guardian ecosystem works alongside these tools. Each owns a distinct laye
 ## Full Scan Sequence (no args on existing project)
 When the user runs `/go` with no arguments on a project that has `go.mod`:
 
-1. Check staleness: call `check_staleness` — if stale scans exist, report them first
-2. Announce: "Running full Go Guardian scan..."
-3. Run in order:
+1. Announce: "Running full Go Guardian scan..."
+2. Run the unified scan: `go-guardian scan --all` via Bash. This single command replaces the previous per-tool MCP calls and produces six markdown artifacts in `.go-guardian/`: `owasp-findings.md`, `dep-vulns.md`, `staleness.md`, `pattern-stats.md`, `health-trends.md`, and `session-findings.md`. Results are warm-start cached by file hash — a second run on unchanged source returns in milliseconds.
+3. Read `.go-guardian/staleness.md` — if the file reports stale scans, surface them at the top of the report so the user knows which parts of the project have not been reviewed recently.
+4. Run in order:
    a. `golangci-lint run --config golangci-lint.template.yml ./...` (or project's `.golangci.yml`)
    b. `go vet ./...`
    c. `go test -race ./... -count=1`
    d. `govulncheck ./...`
-   e. Call `check_owasp` on project root
-   f. Call `query_knowledge` for anti-pattern context
-4. Consolidate findings into a single report (see Report Format below)
-5. Call `get_pattern_stats` and show learning summary
-6. Call `get_health_trends` and append Trends section to report
+5. Read the scan artifacts:
+   a. `.go-guardian/owasp-findings.md` — OWASP findings
+   b. `.go-guardian/dep-vulns.md` — dependency vulnerability findings
+   c. Call `query_knowledge` for anti-pattern context
+6. Consolidate findings into a single report (see Report Format below)
+7. Read `.go-guardian/pattern-stats.md` and include the learning summary
+8. Read `.go-guardian/health-trends.md` and append the Trends section to the report
 
 ## Report Format (full scan)
 
@@ -227,7 +231,7 @@ Knowledge base: <N> patterns learned this session
 Next scan recommended: <date based on staleness thresholds>
 
 ─── Trends ───────────────────────
-<output from get_health_trends>
+<contents of .go-guardian/health-trends.md>
 ```
 
 ## Security Rules
