@@ -1,6 +1,6 @@
 ---
 name: go-security
-description: Go security review — OWASP Top 10, CVE scanning, dependency audit.
+description: Go security review — scans for OWASP Top 10 issues, dependency CVEs, hardcoded secrets, injection flaws, broken auth, weak crypto, and supply-chain risks via `govulncheck` and the go-guardian scan cache. Use when the user asks about security, auth, authorization, crypto, tokens, secrets, passwords, CVEs, vulnerabilities, OWASP, or threat modeling in Go — and proactively when changed files touch `crypto/`, `auth/`, `internal/sql/`, or secret-handling paths.
 argument-hint: "[owasp|cve|deps|threat-model] [path]"
 paths: "*.go,go.mod"
 tools:
@@ -14,9 +14,25 @@ tools:
 # /go-security — Go Security Review
 
 This skill reads scan results from `.go-guardian/*.md` artifacts and writes
-findings to `.go-guardian/inbox/*.md`. The one surviving MCP read path is
-`query_knowledge`. Do NOT delegate to a subagent — MCP tools only work in
-the main conversation.
+findings to `.go-guardian/inbox/*.md`. The surviving MCP read path is
+`query_knowledge`.
+
+## Gotchas
+
+- **Do NOT delegate to a subagent.** `mcp__go-guardian__query_knowledge`
+  only works in the main conversation context.
+- **`/team-spawn security` is reserved for HIGH/CRITICAL findings.**
+  Spawning four parallel reviewers for a single LOW finding is wasteful
+  — handle LOW/MEDIUM inline in this skill.
+- **Cross-reference `govulncheck` with `.go-guardian/dep-vulns.md`.**
+  The scan cache can lag the Go vuln database by up to a day, and
+  `govulncheck` is authoritative.
+- **Never echo secrets.** If a secret, API key, token, or credential is
+  spotted, flag it as a finding but NEVER include its value in output,
+  logs, or MCP tool arguments.
+- **`security-auditor` escalation is for architecture-level concerns
+  only** (threat modeling, compliance, auth architecture, supply chain).
+  Code-level OWASP/CVE findings belong in this skill.
 
 ## Step 1: Read Prior Session Context
 

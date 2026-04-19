@@ -1,6 +1,6 @@
 ---
 name: go-patterns
-description: Query and manage learned Go anti-patterns and fix suggestions.
+description: Query, browse, and analyze learned Go anti-patterns, fix suggestions, and pattern-stats dashboards from the go-guardian knowledge base. Use when the user asks about code patterns, anti-patterns, code smells, architecture issues, design problems, recurring bugs, or wants to see what go-guardian has learned. Also handles pattern-stat dashboards, health trend analysis, and architecture-level reviews.
 argument-hint: "[list|search|stats|trends] [keyword]"
 paths: "*.go"
 tools:
@@ -15,8 +15,18 @@ tools:
 
 This skill routes pattern queries through `query_knowledge` (the one
 surviving MCP read path) and reads the pattern dashboard and health trends
-from markdown artifacts produced by `go-guardian scan --all`. Do NOT
-delegate to a subagent — MCP tools only work in the main conversation.
+from markdown artifacts produced by `go-guardian scan --all`.
+
+## Gotchas
+
+- **Do NOT delegate to a subagent.** `mcp__go-guardian__query_knowledge`
+  only works in the main conversation context.
+- **This skill is read-only.** It never modifies source files — for
+  inline fix proposals, hand off to `/go-review`.
+- **Regenerate stale artifacts before presenting them.** If
+  `.go-guardian/pattern-stats.md` or `.go-guardian/health-trends.md` is
+  missing or stale, run `go-guardian scan --all` first; present a stale
+  dashboard and the user acts on outdated data.
 
 ## Routing
 

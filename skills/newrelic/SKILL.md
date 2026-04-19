@@ -1,12 +1,22 @@
 ---
 name: newrelic
-description: "New Relic observability specialist with live MCP access. Build dashboards, run NRQL queries, analyze metrics, troubleshoot incidents, manage alerts."
+description: "New Relic observability specialist with live MCP access. Use when the user asks to build, create, or design a dashboard; write NRQL queries; analyze golden signals, Kubernetes metrics, SLIs/SLOs, or error budgets; troubleshoot slow services or incidents; list deployments, alerts, or errors; or discover entities in New Relic — even without saying 'New Relic'. Delegates to `newrelic-dashboards`, which tests every query against real data before presenting it."
 argument-hint: "[dashboard|query|alert|troubleshoot|incidents] [service-name]"
 ---
 
 # /newrelic — New Relic Specialist
 
 Analyse the request and delegate to the `newrelic-dashboards` agent. The agent has access to 27 MCP tools from the New Relic hosted MCP server via the gateway bridge.
+
+## Gotchas
+
+- **`newrelic-dashboards` is the only caller of `mcp__newrelic__*`
+  tools.** Do not attempt NRQL execution from this skill directly.
+- **Every NRQL query must be tested against real data via MCP before
+  dashboarding.** Offline-generated NRQL is forbidden — it breaks on
+  edge-case attribute names and stale schemas.
+- **Empty entity discovery usually means the wrong account.**
+  Re-discover the account ID before assuming the service doesn't exist.
 
 ## Routing
 

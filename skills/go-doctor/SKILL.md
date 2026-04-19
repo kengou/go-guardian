@@ -1,12 +1,25 @@
 ---
 name: go-doctor
-description: Diagnose go-guardian installation health — binary, database, schema, seeds, session.
+description: Diagnose go-guardian installation health — runs the built-in healthcheck against the MCP binary, SQLite database, schema, seed data, and session state, plus external deps (Go, ripgrep, sqlite3). Use when the user reports go-guardian isn't working, MCP tools are failing, knowledge queries return empty, `/go` hangs, or they ask to "check", "verify", or "debug" the go-guardian install.
 argument-hint: ""
 ---
 
 # /go-doctor — Go Guardian Health Check
 
 Run the go-guardian MCP server's built-in healthcheck to verify the installation is working correctly.
+
+## Gotchas
+
+- **Binary resolution differs by mode.** In plugin mode, the MCP binary
+  lives at `$CLAUDE_PLUGIN_DATA/go-guardian-mcp`. In standalone mode,
+  it's at `.go-guardian/go-guardian-mcp` in the working tree. If
+  neither exists, the install is broken.
+- **`[WARN] session` outside a Claude Code session is normal** — it
+  means `session-start.sh` didn't run. Only flag this as a problem
+  inside an active session.
+- **`[FAIL] table_*` means the binary is older than the DB schema.**
+  Rebuild the binary (`go build -ldflags="-s -w" -o $MCP_BIN .`); do
+  not delete the DB — that wipes learned patterns.
 
 ## Steps
 

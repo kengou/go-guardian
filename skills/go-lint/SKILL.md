@@ -1,6 +1,6 @@
 ---
 name: go-lint
-description: Run golangci-lint and teach go-guardian from fixes.
+description: Run golangci-lint against Go code, apply safe auto-fixes (errcheck, gofmt, goimports, misspell), fix remaining issues manually, and teach go-guardian from the results. Use when the user asks to lint, format, style-check, clean up, or fix linter errors in Go code — including phrases like "fix linting", "run golangci", "apply goimports", or "why is CI failing on style" — even without explicitly saying "lint".
 argument-hint: "[package] [--fix]"
 paths: "*.go,.golangci.yml,.golangci.yaml"
 tools:
@@ -14,9 +14,19 @@ tools:
 # /go-lint — Go Lint + Learn
 
 This skill drives Go lint fixes through the hooks-only architecture. Learned
-patterns still flow back into the knowledge base, but through inbox-writes
-instead of the deprecated lint learning MCP call. Do NOT delegate to a
-subagent — MCP tools only work in the main conversation.
+patterns still flow back into the knowledge base through inbox-writes
+instead of the deprecated lint learning MCP call.
+
+## Gotchas
+
+- **Do NOT delegate to a subagent.** `mcp__go-guardian__query_knowledge`
+  only works in the main conversation context.
+- **ALWAYS write `.go-guardian/inbox/lint-*.md` after fixing issues,**
+  even if only one rule was fixed. Skipping this breaks the learning
+  loop — the Stop-hook has nothing to ingest.
+- **Only auto-fix safe rules** (`errcheck`, `gofmt`, `goimports`,
+  `misspell`). Enabling auto-fix for `revive` or `gosec` can silently
+  mangle code.
 
 ## Step 1: Load Learned Patterns
 

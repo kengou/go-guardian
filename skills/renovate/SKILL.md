@@ -1,6 +1,6 @@
 ---
 name: renovate
-description: Analyze, validate, and improve Renovate configurations
+description: Analyze, validate, dry-run, and improve Renovate bot configurations (`renovate.json`, `.renovaterc*`). Use when the user asks about dependency automation, dependency updates, renovate, pinning versions, grouping packages, semantic commits for Renovate, or troubleshoots Renovate PR behavior. Learns the user's preferences across sessions via inbox docs so config suggestions improve over time.
 argument-hint: "[path|--auto|dry-run|suggest|learn|stats]"
 paths: "renovate.json,.renovaterc,.renovaterc.json"
 tools:
@@ -14,8 +14,20 @@ tools:
 
 Analyze and improve your Renovate configuration through the `go-guardian`
 CLI. Every operation runs via Bash — this skill has no MCP tools in its
-frontmatter. Do NOT delegate to a subagent — the CLI binary lives in PATH
-and is cheapest to invoke from the main conversation.
+frontmatter.
+
+## Gotchas
+
+- **Do NOT delegate to a subagent.** `go-guardian renovate <verb>` is a
+  PATH binary, cheapest to invoke from the main conversation.
+- **`go-guardian renovate validate` exits non-zero on `✗ ERR:` markers.**
+  If it fails, report each error verbatim to the user and abort BEFORE
+  running `analyze` — analyzing an invalid config just produces noise.
+- **`renovate --dry-run` requires `RENOVATE_TOKEN`.** Check for it
+  before attempting dry-run and fail with a clear message if missing.
+- **ALWAYS write `.go-guardian/inbox/renovate-preference-*.md` after
+  accept/reject.** The learning loop depends on these files; skipping
+  them locks in whichever defaults the user saw first.
 
 ## CLI Contract
 

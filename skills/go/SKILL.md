@@ -1,6 +1,6 @@
 ---
 name: go
-description: Central Go development orchestrator. MoE gating: classifies intent, runs one unified scan, spawns only reviewers with non-empty findings.
+description: Central Go development orchestrator — dispatches to review, security, lint, test, patterns, renovate, dependency, documentation, and feature-lifecycle workflows. Use when the user works on Go code (`.go`, `go.mod`, `go.sum`) and asks to review, check, analyze, scan, fix, audit, plan, implement, validate, or document it — even without explicitly saying "Go". Serves as the entry point for all `/go <subcommand>` invocations.
 argument-hint: "[scan|review|test|lint|security|deps|design|plan|implement|validate|docs|explain|diagram|adr|api-docs] [path|topic]"
 paths: "*.go,go.mod,go.sum"
 tools:
@@ -19,9 +19,27 @@ This skill is the central entry point for Go work. It operates as a
 single unified scan via `go-guardian scan --all`, reads the resulting
 markdown artifacts in `.go-guardian/`, and then spawns **only** the
 reviewer agents whose dimensions have non-empty findings. Experts with an
-empty work queue are not activated. Do NOT delegate routing to a subagent —
-the classifier must run in the main conversation so it stays near-zero
-latency.
+empty work queue are not activated.
+
+## Gotchas
+
+- **Do NOT delegate the Stage 1 classifier to a subagent.** It must run
+  in the main conversation so the MoE gate stays near-zero latency — a
+  subagent round-trip defeats the feature this skill exists to enforce.
+- **Stage 1 is rule-based (keyword + path regex), not LLM-backed.**
+  Keep it that way. An LLM round-trip on every `/go` invocation would
+  break the hot-path cost.
+- **`go-guardian scan --all` is SQLite-hash cached.** A second run on
+  unchanged source is near-zero cost. Do not add a force-rescan flag
+  unless the user explicitly asks.
+- **Stage 3 skips reviewers with empty findings.** "Empty" means no
+  severity markers (`HIGH`/`CRITICAL`/`MEDIUM`/`LOW`) and no `file:line`
+  citations — a header line or "no findings detected" sentinel still
+  counts as empty.
+- **References are loaded on demand.** The Stage 1 classifier tables
+  live in `references/classifier.md`; the Stage 3 dimension map lives
+  in `references/dimension-map.md`. Only load them on the full-scan hot
+  path, not on explicit-subcommand routing.
 
 ## Explicit Subcommand Routing
 
@@ -74,47 +92,16 @@ four-stage gating pipeline. This is the hot path; it must stay fast.
 
 ### Stage 1: Intent Classification (rule-based, deterministic)
 
-Classify which Go review dimensions are relevant to this session. Use a
-**rule-based** classifier — lookup tables and regex only, **no LLM call**.
-`/go` runs near the top of every relevant session; an LLM classification
-round-trip would defeat the latency goal this feature exists to enforce.
-The classifier must be deterministic so repeat invocations on the same
-input produce the same routing decision.
+Classify which Go review dimensions are relevant. Use a **rule-based**
+classifier — lookup tables and regex only, **no LLM call**. The
+classifier must be deterministic so repeat invocations on the same
+input produce the same routing.
 
-Two signals feed the classifier:
-
-**Signal A — user message keywords.** Match keywords and phrases in the
-user's message against dimension hints:
-
-| Dimension | Keywords |
-|-----------|----------|
-| review    | "review", "audit", "look at" |
-| security  | "security", "auth", "crypto", "secret", "token", "password", "owasp", "cve" |
-| lint      | "lint", "format", "style", "golangci" |
-| test      | "test", "coverage", "race", "flake", "fixture" |
-| patterns  | "pattern", "anti-pattern", "architecture", "design", "smell" |
-| deps      | "deps", "dependency", "vuln", "govulncheck", "go.mod", "upgrade" |
-| staleness | "stale", "freshness", "rescan" |
-| renovate  | "renovate", "renovate.json", "dependency bot" |
-
-**Signal B — changed files via git state.** Run `git diff --name-only HEAD`
-via Bash and bias dimensions from path prefixes and extensions:
-
-| Path signal | Biases ON |
-|-------------|-----------|
-| `crypto/`, `auth/`, `internal/sql/`, `*secrets*`, `*.pem` | security |
-| `*_test.go` | test |
-| `Dockerfile`, `*.Dockerfile` | patterns, security |
-| `Chart.yaml`, `values.yaml`, `templates/*.yaml` | patterns, security |
-| `*.go`, `go.mod`, `go.sum` (general) | review, lint, patterns |
-| `go.mod`, `go.sum` | deps |
-| `renovate.json`, `.renovaterc*` | renovate |
-| only `README.md`, `docs/**`, `*.md` | (no Go dimensions — return early) |
-
-**Emit the relevant set.** Union the two signals into a set drawn from
-`{review, security, lint, test, patterns, deps, staleness, renovate}`.
-If the union is empty (e.g. "explain this Python script"), print "no Go
-dimensions relevant" and return immediately — do NOT run the scan.
+Load `references/classifier.md` for the two signal tables (keywords by
+dimension, file-path biases) and the union rule. Apply both signals via
+`git diff --name-only HEAD` and user-message keyword matching, union
+the results, and emit the relevant set. If the union is empty, return
+immediately — do NOT run the scan.
 
 ### Stage 2: Single Unified Scan
 
@@ -142,35 +129,9 @@ work to do.
 
 ### Stage 3: Empty-Findings Short-Circuit (the MoE Gate)
 
-For each dimension in the relevant set from Stage 1, read the matching
-artifact file and decide whether to spawn its reviewer. The mapping from
-dimension to artifact to spawn target:
-
-| Dimension | Artifact                             | Spawn target   |
-|-----------|--------------------------------------|----------------|
-| review    | `.go-guardian/session-findings.md`   | `/go-review`   |
-| security  | `.go-guardian/owasp-findings.md`     | `/go-security` |
-| deps      | `.go-guardian/dep-vulns.md`          | `/go-security` |
-| staleness | `.go-guardian/staleness.md`          | (report only)  |
-| patterns  | `.go-guardian/pattern-stats.md`      | `/go-patterns` |
-| lint      | `.go-guardian/session-findings.md`   | `/go-lint`     |
-| test      | `.go-guardian/session-findings.md`   | `/go-test`     |
-| renovate  | (renovate.json validation)           | `/renovate`    |
-
-**Emptiness test.** A findings file is "empty" if, after trimming
-whitespace, it contains no finding entries — the file may still carry a
-header or a "no findings detected" sentinel line. Use `Grep` or a plain
-`Read` to check for finding markers (severity labels like `HIGH`,
-`CRITICAL`, `MEDIUM`, `LOW`, or `file:line` citations).
-
-**Gating rule.** For each relevant dimension whose artifact is empty, do
-**not** spawn the reviewer — record the skip with reason "empty findings
-artifact". For each relevant dimension whose artifact has findings,
-invoke the matching per-dimension skill via slash command. Each spawned
-skill reads the same scan artifacts (never re-running the scan) and
-drops its own refined findings into `.go-guardian/inbox/` as markdown
-documents, which the Stop hook flushes into the knowledge base at session
-end.
+Load `references/dimension-map.md` for the dimension → artifact →
+spawn-target table, the emptiness test, and the gating rule. Apply them
+to each dimension in the relevant set.
 
 Use `query_knowledge` to pull learned patterns relevant to the spawned
 dimensions. Use `suggest_fix` when the orchestrator wants to offer an

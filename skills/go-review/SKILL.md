@@ -1,6 +1,6 @@
 ---
 name: go-review
-description: Go code review — architecture, style, correctness, Go idioms.
+description: Review Go code for architecture, style, correctness, concurrency bugs, error handling, and idiomatic Go usage. Use when the user asks to review, audit, look over, give feedback on, check, or critique Go code — even without explicitly saying "review". Covers individual files, packages, and whole-repo reviews; escalates to parallel multi-dimension review via `agent-teams:team-review` for large changesets (>10 files or >500 lines).
 argument-hint: "[file-or-package] [--focus concurrency|errors|style]"
 paths: "*.go"
 tools:
@@ -15,10 +15,22 @@ tools:
 # /go-review — Go Code Review
 
 This skill drives Go code review through the hooks-only architecture: scan
-results are read from `.go-guardian/*.md` artifacts, findings are written to
-`.go-guardian/inbox/*.md`, and the one surviving MCP read path is
-`query_knowledge`. Do NOT delegate to a subagent — MCP tools only work in
-the main conversation.
+results are read from `.go-guardian/*.md` artifacts, findings are written
+to `.go-guardian/inbox/*.md`, and the surviving MCP read path is
+`query_knowledge` / `suggest_fix`.
+
+## Gotchas
+
+- **Do NOT delegate to a subagent.** `mcp__go-guardian__query_knowledge`
+  and `mcp__go-guardian__suggest_fix` only work in the main conversation
+  context.
+- **Every finding and accepted fix MUST be written to
+  `.go-guardian/inbox/review-*.md`** before the session ends. Skipping
+  this leaves the Stop-hook with nothing to ingest and the learning loop
+  silently stays flat.
+- **`/team-spawn` / team-review escalation is for large changesets only**
+  (>10 files or >500 lines). For small reviews, a single pass in this
+  skill is cheaper and catches the same issues.
 
 ## Step 1: Read Prior Session Context
 

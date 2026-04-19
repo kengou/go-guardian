@@ -1,6 +1,6 @@
 ---
 name: go-test
-description: Run Go tests with race detector and coverage reporting.
+description: Run, write, analyze, and debug Go tests with race detector, coverage reporting, and test quality review. Use when the user asks to run tests, write new tests, debug failing or flaky tests, improve coverage, add race detection, check test quality, or review test fixtures — even without explicitly saying "test". Catches anti-patterns like `time.Sleep`, missing error assertions, flaky fixtures, and coverage gaps.
 argument-hint: "[package-or-file] [--race] [--cover]"
 paths: "*.go,*_test.go"
 tools:
@@ -13,9 +13,22 @@ tools:
 
 # /go-test — Go Test
 
-This skill reads prior session context from `.go-guardian/session-findings.md`
-and pulls learned patterns via `query_knowledge`. Do NOT delegate to a
-subagent — MCP tools only work in the main conversation.
+This skill reads prior session context from
+`.go-guardian/session-findings.md` and pulls learned patterns via
+`query_knowledge`.
+
+## Gotchas
+
+- **Do NOT delegate to a subagent.** `mcp__go-guardian__query_knowledge`
+  only works in the main conversation context.
+- **Always use `-race -count=1`.** Caching (`-count=0`) hides flaky
+  tests, and missing `-race` hides concurrency bugs until production.
+- **Coverage thresholds: 60% overall, 80% for security-relevant
+  packages.** Packages below threshold are a finding, not silently
+  accepted.
+- **`time.Sleep` in tests is an anti-pattern** — slow and flaky. Flag
+  it when seen and suggest synchronization primitives (channels,
+  `sync.WaitGroup`, `context`) instead.
 
 ## Step 1: Read Prior Session Context
 
