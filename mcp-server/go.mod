@@ -3,7 +3,7 @@ module github.com/kengou/go-guardian/mcp-server
 go 1.26
 
 require (
-	github.com/mark3labs/mcp-go v0.47.0
+	github.com/mark3labs/mcp-go v0.47.1
 	modernc.org/sqlite v1.48.1
 )
 
