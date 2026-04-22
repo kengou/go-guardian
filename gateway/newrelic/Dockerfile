@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------
 # Build stage — install mcp-remote with npm
 # ---------------------------------------------------------------------------
-FROM node:24-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f AS builder
+FROM node:24-slim@sha256:03eae3ef7e88a9de535496fb488d67e02b9d96a063a8967bae657744ecd513f2 AS builder
 
 WORKDIR /app
 COPY package.json ./
@@ -30,7 +30,7 @@ COPY bridge.mjs ./
 #
 # Build:  docker build --target slim -t newrelic-mcp:slim .
 # ---------------------------------------------------------------------------
-FROM node:24-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f AS slim
+FROM node:24-slim@sha256:03eae3ef7e88a9de535496fb488d67e02b9d96a063a8967bae657744ecd513f2 AS slim
 
 LABEL org.opencontainers.image.source="https://github.com/kengou/go-guardian"
 LABEL org.opencontainers.image.description="New Relic MCP bridge — mcp-remote stdio proxy for agentgateway"
