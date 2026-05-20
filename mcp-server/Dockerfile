@@ -1,6 +1,6 @@
 # Build stage — runs on the build machine's native platform for speed.
 # Cross-compilation is handled by GOOS/GOARCH, not by emulation.
-FROM --platform=${BUILDPLATFORM} golang:1.26@sha256:595c7847cff97c9a9e76f015083c481d26078f961c9c8dca3923132f51fe12f1 AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.26@sha256:6df14f4a4bc9d979a3721f488981e0d1b318006377e473ed23d026796f5f4c0a AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
